@@ -40,7 +40,38 @@ def jpeg_size(data):
 def capture_loop(device):
     raw = "/tmp/pygu-raw.jpg"
     jpeg = "/tmp/pygu-frame.jpg"
+    live = "/tmp/pygu-live.jpg"
+    last = b""
+    try:
+        subprocess.run(
+            ["xcrun", "simctl", "io", device, "screenshot", "--type=jpeg", "--mask=ignored", raw],
+            capture_output=True,
+            timeout=8,
+        )
+        prime = open(raw, "rb").read()
+        width, height = jpeg_size(prime)
+        if width > 100:
+            with lock:
+                state["width"] = width
+                state["height"] = height
+    except Exception:
+        pass
     while True:
+        try:
+            age = time.time() - os.path.getmtime(live)
+            data = open(live, "rb").read() if age < 1.2 else b""
+            if data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9") and data != last:
+                last = data
+                with lock:
+                    state["image"] = data
+                    state["error"] = ""
+                time.sleep(0.004)
+                continue
+            if data.startswith(b"\xff\xd8"):
+                time.sleep(0.008)
+                continue
+        except Exception:
+            pass
         try:
             shot = subprocess.run(
                 ["xcrun", "simctl", "io", device, "screenshot", "--type=jpeg", "--mask=ignored", raw],
@@ -56,7 +87,7 @@ def capture_loop(device):
                 )
             data = open(raw, "rb").read()
             if not (data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")):
-                time.sleep(0.1)
+                time.sleep(0.08)
                 continue
             width, height = jpeg_size(data)
             squeezed = subprocess.run(
@@ -81,15 +112,18 @@ def capture_loop(device):
                 smaller = open(jpeg, "rb").read()
                 if smaller.startswith(b"\xff\xd8"):
                     data = smaller
-            with lock:
-                state["image"] = data
-                state["width"] = width
-                state["height"] = height
-                state["error"] = ""
+            if data != last:
+                last = data
+                with lock:
+                    state["image"] = data
+                    if width > 900:
+                        state["width"] = width
+                        state["height"] = height
+                    state["error"] = ""
         except Exception as exc:
             with lock:
                 state["error"] = str(exc)
-            time.sleep(0.2)
+            time.sleep(0.15)
 
 
 def touch_send(payload):
@@ -299,7 +333,7 @@ def make_handler():
                             last = now
                             self.wfile.write(len(image).to_bytes(4, "big") + image)
                             self.wfile.flush()
-                        time.sleep(0.01)
+                        time.sleep(0.003)
                 except Exception:
                     return
             if path == "/frame":
@@ -381,8 +415,10 @@ def make_handler():
                     if not ok and not linked:
                         ok, detail = menu("Home")
                 elif path == "/lock":
-                    ok, detail = run_idb(["ui", "button", "LOCK"])
-                    if not ok:
+                    ok, detail, linked = touch_send({"op": "button", "name": "LOCK"})
+                    if not ok and not linked:
+                        ok, detail = run_idb(["ui", "button", "LOCK"])
+                    if not ok and not linked:
                         ok, detail = menu("Lock")
                 elif path == "/type":
                     text = str(body.get("text", ""))[:32].replace("\\", "").replace('"', "")
