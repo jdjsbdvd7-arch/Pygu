@@ -77,15 +77,18 @@ def make_handler():
                 self.send_header("x-accel-buffering", "no")
                 self.end_headers()
                 previous = b""
+                last = 0.0
                 try:
                     while True:
                         with lock:
                             image = state["image"]
-                        if image and image != previous:
+                        now = time.time()
+                        if image and (image != previous or now - last > 0.08):
                             previous = image
+                            last = now
                             self.wfile.write(len(image).to_bytes(4, "big") + image)
                             self.wfile.flush()
-                        time.sleep(0.03)
+                        time.sleep(0.02)
                 except Exception:
                     return
             if path == "/frame":
