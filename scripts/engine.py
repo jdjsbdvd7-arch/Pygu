@@ -96,7 +96,7 @@ def touch_send(payload):
     try:
         with socket.create_connection(("127.0.0.1", 8791), timeout=0.2) as sock:
             sock.sendall((json.dumps(payload) + "\n").encode())
-            sock.settimeout(0.45)
+            sock.settimeout(2.0)
             ack = b""
             while b"\n" not in ack and len(ack) < 240:
                 chunk = sock.recv(240)
@@ -105,9 +105,12 @@ def touch_send(payload):
                 ack += chunk
         text = ack.decode().strip()
         print("[tap]", text or "touch silent", flush=True)
-        return text == "ok", text or "touch silent"
+        return text == "ok", text or "touch silent", True
     except Exception as exc:
-        return False, str(exc)
+        detail = str(exc)
+        print("[tap]", detail, flush=True)
+        linked = "refused" not in detail.lower() and "nodename" not in detail.lower()
+        return False, detail, linked
 
 
 def device_point(nx, ny):
@@ -287,12 +290,16 @@ def make_handler():
                         with lock:
                             image = state["image"]
                         now = time.time()
-                        if image and (image != previous or now - last > 0.08):
+                        if image and image != previous:
                             previous = image
                             last = now
                             self.wfile.write(len(image).to_bytes(4, "big") + image)
                             self.wfile.flush()
-                        time.sleep(0.02)
+                        elif image and now - last > 1.5:
+                            last = now
+                            self.wfile.write(len(image).to_bytes(4, "big") + image)
+                            self.wfile.flush()
+                        time.sleep(0.01)
                 except Exception:
                     return
             if path == "/frame":
@@ -330,30 +337,29 @@ def make_handler():
                         return
                     if abs(x1 - x0) < 0.02 and abs(y1 - y0) < 0.02:
                         spot = device_point(x1, y1)
-                        ok, detail = (False, "")
+                        ok, detail, linked = (False, "", False)
                         if spot:
-                            ok, detail = touch_send({"op": "tap", "x": spot[0], "y": spot[1]})
-                        if not ok and spot and idb_bin():
+                            ok, detail, linked = touch_send({"op": "tap", "x": spot[0], "y": spot[1]})
+                        if not ok and not linked and spot and idb_bin():
                             ok, detail = run_idb(["ui", "tap", str(spot[0]), str(spot[1]), "--duration", "0.02"])
-                        if not ok:
+                        if not ok and not linked:
                             ok, detail = pointer(x1, y1)
                     else:
                         start = device_point(x0, y0)
                         end = device_point(x1, y1)
-                        ok = False
-                        detail = ""
+                        ok, detail, linked = False, "", False
                         if start and end:
-                            ok, detail = touch_send(
+                            ok, detail, linked = touch_send(
                                 {
                                     "op": "swipe",
                                     "x": start[0],
                                     "y": start[1],
                                     "x2": end[0],
                                     "y2": end[1],
-                                    "duration": 0.09,
+                                    "duration": 0.08,
                                 }
                             )
-                        if not ok and start and end and idb_bin():
+                        if not ok and not linked and start and end and idb_bin():
                             ok, detail = run_idb(
                                 [
                                     "ui",
@@ -363,16 +369,16 @@ def make_handler():
                                     str(end[0]),
                                     str(end[1]),
                                     "--duration",
-                                    "0.09",
+                                    "0.08",
                                 ]
                             )
-                        if not ok:
+                        if not ok and not linked:
                             ok, detail = pointer(x0, y0, x1, y1)
                 elif path == "/home":
-                    ok, detail = touch_send({"op": "button", "name": "HOME"})
-                    if not ok:
+                    ok, detail, linked = touch_send({"op": "button", "name": "HOME"})
+                    if not ok and not linked:
                         ok, detail = run_idb(["ui", "button", "HOME"])
-                    if not ok:
+                    if not ok and not linked:
                         ok, detail = menu("Home")
                 elif path == "/lock":
                     ok, detail = run_idb(["ui", "button", "LOCK"])

@@ -78,7 +78,7 @@ def handle(loop, client, conn):
             data += chunk
         message = json.loads(data.decode() or "{}")
         future = asyncio.run_coroutine_threadsafe(act(client, message), loop)
-        future.result(timeout=0.45)
+        future.result(timeout=2.0)
         conn.sendall(b"ok\n")
     except Exception as exc:
         try:

@@ -87,6 +87,84 @@ async function refresh() {
   } catch (err) {}
 }
 
+let painting = false;
+let pending = null;
+
+function show(bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+  return decode(next, url).then(() => {
+    next.style.visibility = "visible";
+    shown.style.visibility = "hidden";
+    if (urlShown) URL.revokeObjectURL(urlShown);
+    urlShown = url;
+    const previous = shown;
+    shown = next;
+    next = previous;
+    boot.classList.add("hide");
+  }).catch(() => {
+    URL.revokeObjectURL(url);
+  });
+}
+
+function paint(bytes) {
+  pending = bytes;
+  if (painting) return;
+  painting = true;
+  (async () => {
+    while (pending) {
+      const frame = pending;
+      pending = null;
+      await show(frame);
+    }
+    painting = false;
+  })();
+}
+
+async function watch() {
+  let reader = null;
+  try {
+    if (!live) await refresh();
+    if (!live) throw new Error("wait");
+    const res = await fetch("/api/live?via=" + encodeURIComponent(live), { cache: "no-store" });
+    if (!res.ok || !res.body || !res.body.getReader) throw new Error("stream");
+    reader = res.body.getReader();
+    let buf = new Uint8Array(0);
+    let saw = false;
+    const slow = setTimeout(() => {
+      if (!saw && reader) reader.cancel().catch(() => {});
+    }, 2200);
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const merged = new Uint8Array(buf.length + chunk.value.length);
+      merged.set(buf);
+      merged.set(chunk.value, buf.length);
+      buf = merged;
+      while (buf.length >= 4) {
+        const size = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+        if (size < 80 || size > 1500000) {
+          buf = buf.subarray(1);
+          continue;
+        }
+        if (buf.length < 4 + size) break;
+        const jpeg = buf.slice(4, 4 + size);
+        buf = buf.subarray(4 + size);
+        saw = true;
+        clearTimeout(slow);
+        paint(jpeg);
+      }
+    }
+    clearTimeout(slow);
+    if (!saw) throw new Error("empty");
+  } catch (err) {
+    if (!urlShown) {
+      pull();
+      return;
+    }
+  }
+  setTimeout(watch, 60);
+}
+
 async function pull() {
   try {
     if (!live) await refresh();
@@ -190,7 +268,7 @@ touch.addEventListener("pointerup", (event) => {
   up(event);
 });
 
-pull();
+watch();
 </script>
 </body>
 </html>
