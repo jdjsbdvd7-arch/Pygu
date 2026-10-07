@@ -1,62 +1,30 @@
 * { box-sizing: border-box; }
-html, body, #root { margin: 0; min-height: 100%; }
-body {
-  background: #ececee;
-  background-image: radial-gradient(#d7d7db 1px, transparent 1px);
-  background-size: 18px 18px;
-  color: #1d1d1f;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+html, body, #root { margin: 0; height: 100%; background: #000; overflow: hidden; }
+img {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  touch-action: none;
+  user-select: none;
 }
-button { font: inherit; color: inherit; }
-.stage { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem 1rem 2rem; }
-.row { display: flex; align-items: center; gap: 1.1rem; }
-.device {
-  width: min(320px, 72vw);
-  padding: 11px;
-  border-radius: 46px;
-  background: #111;
-  box-shadow: 0 24px 60px rgb(0 0 0 / 18%), inset 0 0 0 2px #2a2a2a;
-}
-.screen { position: relative; border-radius: 36px; overflow: hidden; background: #000; }
-.screen img { width: 100%; height: auto; display: block; touch-action: none; }
-.idle { aspect-ratio: 390 / 844; display: grid; place-items: center; color: #8e8e93; }
-.press {
-  position: absolute;
-  width: 28px;
-  height: 28px;
-  margin: -14px 0 0 -14px;
-  border-radius: 50%;
-  background: rgb(0 0 0 / 18%);
-  pointer-events: none;
-}
-.rail {
-  display: grid;
-  gap: 0.55rem;
-  padding: 0.55rem;
-  border-radius: 22px;
-  background: #fff;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 8%);
-}
-.rail button, .spin {
-  width: 48px;
-  height: 48px;
-  border: 0;
-  border-radius: 14px;
-  background: #fff;
+.wait {
+  position: fixed;
+  inset: 0;
   display: grid;
   place-items: center;
+  color: #8e8e93;
+  background: #000;
+  font: 16px -apple-system, BlinkMacSystemFont, sans-serif;
 }
-.rail button.on { background: #e8e8ed; }
-.spin { margin: 1rem auto 0; border-radius: 50%; box-shadow: 0 10px 30px rgb(0 0 0 / 8%); }
-.bar {
+.wait a { color: inherit; }
+.press {
   position: fixed;
-  left: 0;
-  right: 0;
-  top: 0;
-  display: flex;
-  justify-content: space-between;
-  padding: 0.8rem 1rem;
-  font-size: 0.85rem;
-  color: #6e6e73;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 35%);
+  pointer-events: none;
 }
-.bar a { color: inherit; }
