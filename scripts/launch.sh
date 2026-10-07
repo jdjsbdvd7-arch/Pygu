@@ -5,15 +5,23 @@ if [ -d /Applications/Xcode.app ]; then
   sudo xcode-select -s /Applications/Xcode.app
 fi
 
+TITLE=$(printf '%s' "${TITLE:-Pygu}" | tr -cd 'A-Za-z0-9 ._-')
+TITLE=$(printf '%s' "$TITLE" | cut -c1-24)
+if [ -z "$TITLE" ]; then
+  TITLE=Pygu
+fi
+
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
 rm -rf build
 mkdir -p build/Pygu.app
 cp app/Info.plist build/Pygu.app/Info.plist
+printf '#define SCREEN_TITLE @"%s"\n' "$TITLE" > build/title.h
 
 xcrun -sdk iphonesimulator clang \
   -fobjc-arc \
   -fmodules \
+  -include build/title.h \
   -target "${ARCH}-apple-ios17.0-simulator" \
   -isysroot "$SDK" \
   -framework UIKit \
@@ -45,8 +53,8 @@ xcrun simctl launch "$UDID" app.pygu.runner
 sleep 4
 mkdir -p run
 xcrun simctl io "$UDID" screenshot run/screen.png
-python3 - "$UDID" << 'PY'
+python3 - "$UDID" "$TITLE" << 'PY'
 import json, sys
-json.dump({"status": "launched", "bundle": "app.pygu.runner", "udid": sys.argv[1]}, open("run/result.json", "w"), indent=2)
+json.dump({"status": "launched", "bundle": "app.pygu.runner", "title": sys.argv[2], "udid": sys.argv[1]}, open("run/result.json", "w"), indent=2)
 open("run/result.json", "a").write("\n")
 PY

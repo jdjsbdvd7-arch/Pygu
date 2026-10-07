@@ -1,5 +1,9 @@
 #import <UIKit/UIKit.h>
 
+#ifndef SCREEN_TITLE
+#define SCREEN_TITLE @"Pygu"
+#endif
+
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
@@ -12,7 +16,7 @@
   UIViewController *controller = [UIViewController new];
   controller.view.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.09 alpha:1];
   UILabel *label = [[UILabel alloc] initWithFrame:controller.view.bounds];
-  label.text = @"Pygu";
+  label.text = SCREEN_TITLE;
   label.textColor = UIColor.whiteColor;
   label.textAlignment = NSTextAlignmentCenter;
   label.font = [UIFont systemFontOfSize:42 weight:UIFontWeightSemibold];

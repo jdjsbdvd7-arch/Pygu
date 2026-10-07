@@ -2,6 +2,11 @@ name: launch
 
 on:
   workflow_dispatch:
+    inputs:
+      title:
+        description: Screen text
+        required: false
+        default: Pygu
   push:
     branches: [main]
     paths:
@@ -20,6 +25,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Launch on the Simulator
+        env:
+          TITLE: ${{ inputs.title }}
         run: bash scripts/launch.sh
 
       - name: Publish the shot
