@@ -46,9 +46,9 @@ async function pull() {
     const previous = shown;
     shown = next;
     next = previous;
-    wait.hidden = true;
+    wait.style.display = "none";
   } catch (err) {
-    if (!urlShown) wait.hidden = false;
+    if (!urlShown) wait.style.display = "grid";
   }
   setTimeout(pull, 90);
 }
