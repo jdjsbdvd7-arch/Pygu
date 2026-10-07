@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import glob
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -177,11 +179,23 @@ end tell
     return False, (proc.stderr or proc.stdout or "menu failed").strip()[-200:]
 
 
+def idb_bin():
+    found = shutil.which("idb")
+    if found:
+        return found
+    for path in ("/tmp/idb/idb", os.path.expanduser("~/bin/idb")):
+        if os.path.isfile(path):
+            return path
+    matches = glob.glob(os.path.expanduser("~/Library/Python/*/bin/idb"))
+    return matches[0] if matches else ""
+
+
 def run_idb(args):
-    if not shutil.which("idb"):
+    binary = idb_bin()
+    if not binary:
         return False, "idb missing"
     try:
-        proc = subprocess.run(["idb", *args, "--udid", udid], capture_output=True, text=True, timeout=12)
+        proc = subprocess.run([binary, *args, "--udid", udid], capture_output=True, text=True, timeout=12)
     except Exception as exc:
         return False, str(exc)
     if proc.returncode != 0:

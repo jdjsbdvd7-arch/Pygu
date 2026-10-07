@@ -48,10 +48,15 @@ if [ -n "$COMPANION" ]; then
   chmod +x "$COMPANION"
   "$COMPANION" --udid "$UDID" >/tmp/idb.log 2>&1 &
 fi
-python3 -m pip install --user --break-system-packages fb-idb || true
-PYBIN=$(python3 -c 'import glob,os; print(":".join(glob.glob(os.path.expanduser("~/Library/Python/*/bin"))))')
-export PATH="$PYBIN:$PATH:/opt/homebrew/bin:/usr/local/bin"
-command -v idb || echo "idb client missing"
+python3 -m pip install --user --break-system-packages fb-idb > /tmp/pip-idb.log 2>&1 || true
+cat /tmp/pip-idb.log || true
+IDB=$(find "$HOME/Library/Python" -type f -name idb 2>/dev/null | head -1 || true)
+echo "idb binary: ${IDB:-missing}"
+if [ -n "$IDB" ]; then
+  cp "$IDB" /tmp/idb/idb
+  chmod +x /tmp/idb/idb
+fi
+export PATH="/tmp/idb:$HOME/bin:$PATH:/opt/homebrew/bin:/usr/local/bin"
 
 python3 -u scripts/engine.py --udid "$UDID" --port 8787 >/tmp/engine.log 2>&1 &
 ENGINE=$!
