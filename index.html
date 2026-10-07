@@ -5,65 +5,75 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Pygu</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  img { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; touch-action: none; user-select: none; -webkit-user-select: none; }
-  .wait { position: fixed; inset: 0; display: grid; place-items: center; color: #8e8e93; font: 16px -apple-system, BlinkMacSystemFont, sans-serif; background: #000; }
-  .press { position: fixed; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: rgb(255 255 255 / 35%); pointer-events: none; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
+  img { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #touch { position: fixed; inset: 0; z-index: 2; touch-action: none; }
+  .wait { position: fixed; inset: 0; z-index: 3; display: grid; place-items: center; color: #8e8e93; background: #000; font: 16px -apple-system, BlinkMacSystemFont, sans-serif; }
+  .press { position: fixed; z-index: 4; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: rgb(255 255 255 / 35%); pointer-events: none; }
 </style>
 </head>
 <body>
-<img id="feed" alt="">
-<div class="wait" id="wait" hidden></div>
+<img id="a" alt="">
+<img id="b" alt="" style="visibility:hidden">
+<div id="touch"></div>
+<div class="wait" id="wait">Connecting</div>
 <script>
-const feed = document.querySelector("#feed");
 const wait = document.querySelector("#wait");
+const touch = document.querySelector("#touch");
+let shown = document.querySelector("#a");
+let next = document.querySelector("#b");
+let urlShown = "";
 let stroke = [];
-let busy = false;
-let shown = false;
 
-feed.onload = () => {
-  if (!feed.getAttribute("src")) return;
-  shown = true;
-  wait.hidden = true;
-  busy = false;
-  setTimeout(pull, 120);
-};
-feed.onerror = () => {
-  busy = false;
-  if (!shown) {
-    wait.hidden = false;
-    wait.textContent = "Connecting";
+function decode(img, url) {
+  return new Promise((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("decode"));
+    img.src = url;
+  });
+}
+
+async function pull() {
+  try {
+    const res = await fetch("/api/go?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("http");
+    const url = URL.createObjectURL(await res.blob());
+    await decode(next, url);
+    next.style.visibility = "visible";
+    shown.style.visibility = "hidden";
+    if (urlShown) URL.revokeObjectURL(urlShown);
+    urlShown = url;
+    const previous = shown;
+    shown = next;
+    next = previous;
+    wait.hidden = true;
+  } catch (err) {
+    if (!urlShown) wait.hidden = false;
   }
-  setTimeout(pull, 400);
-};
-
-function pull() {
-  if (busy) return;
-  busy = true;
-  feed.src = "/api/go?t=" + Date.now();
+  setTimeout(pull, 90);
 }
 
 function point(event) {
   return { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight };
 }
 
-feed.addEventListener("pointerdown", (event) => {
-  feed.setPointerCapture(event.pointerId);
+touch.addEventListener("pointerdown", (event) => {
+  touch.setPointerCapture(event.pointerId);
   stroke = [point(event)];
   const dot = document.createElement("span");
   dot.className = "press";
   dot.style.left = event.clientX + "px";
   dot.style.top = event.clientY + "px";
   document.body.appendChild(dot);
-  setTimeout(() => dot.remove(), 160);
+  setTimeout(() => dot.remove(), 140);
 });
-feed.addEventListener("pointermove", (event) => {
+touch.addEventListener("pointermove", (event) => {
   if (!stroke.length) return;
-  const next = point(event);
+  const here = point(event);
   const last = stroke[stroke.length - 1];
-  if (Math.hypot(next.x - last.x, next.y - last.y) > 0.012) stroke.push(next);
+  if (Math.hypot(here.x - last.x, here.y - last.y) > 0.008) stroke.push(here);
 });
-feed.addEventListener("pointerup", () => {
+touch.addEventListener("pointerup", () => {
   const points = stroke;
   stroke = [];
   if (!points.length) return;

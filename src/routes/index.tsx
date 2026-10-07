@@ -6,40 +6,72 @@ type Point = { x: number; y: number };
 export const Route = createFileRoute("/")({ component: Screen });
 
 function Screen() {
-  const feed = useRef<HTMLImageElement>(null);
+  const shown = useRef<HTMLImageElement>(null);
+  const next = useRef<HTMLImageElement>(null);
+  const urlShown = useRef("");
   const stroke = useRef<Point[]>([]);
-  const busy = useRef(false);
   const [seen, setSeen] = useState(false);
 
-  function pull() {
-    const img = feed.current;
-    if (!img || busy.current) return;
-    busy.current = true;
-    img.src = `/api/go?t=${Date.now()}`;
-  }
-
   useEffect(() => {
-    pull();
+    let stop = false;
+    const front = shown.current;
+    const back = next.current;
+    if (!front || !back) return;
+    const frontImg: HTMLImageElement = front;
+    const backImg: HTMLImageElement = back;
+
+    function decode(img: HTMLImageElement, url: string) {
+      return new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("decode"));
+        img.src = url;
+      });
+    }
+
+    async function pull() {
+      if (stop) return;
+      try {
+        const res = await fetch(`/api/go?t=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error("http");
+        const url = URL.createObjectURL(await res.blob());
+        if (stop) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        await decode(backImg, url);
+        backImg.style.visibility = "visible";
+        frontImg.style.visibility = "hidden";
+        if (urlShown.current) URL.revokeObjectURL(urlShown.current);
+        urlShown.current = url;
+        const frontSrc = frontImg.src;
+        frontImg.src = backImg.src;
+        frontImg.style.visibility = "visible";
+        backImg.style.visibility = "hidden";
+        backImg.removeAttribute("src");
+        if (frontSrc.startsWith("blob:")) URL.revokeObjectURL(frontSrc);
+        setSeen(true);
+      } catch {
+        if (!urlShown.current) setSeen(false);
+      }
+      if (!stop) window.setTimeout(pull, 90);
+    }
+
+    void pull();
+    return () => {
+      stop = true;
+    };
   }, []);
 
-  function point(event: ReactPointerEvent<HTMLImageElement>): Point {
+  function point(event: ReactPointerEvent<HTMLDivElement>): Point {
     return { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight };
   }
 
   return (
     <>
-      <img
-        ref={feed}
-        alt=""
-        onLoad={() => {
-          busy.current = false;
-          setSeen(true);
-          window.setTimeout(pull, 120);
-        }}
-        onError={() => {
-          busy.current = false;
-          window.setTimeout(pull, 400);
-        }}
+      <img ref={shown} alt="" />
+      <img ref={next} alt="" style={{ visibility: "hidden" }} />
+      <div
+        id="touch"
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
           stroke.current = [point(event)];
@@ -48,13 +80,13 @@ function Screen() {
           dot.style.left = `${event.clientX}px`;
           dot.style.top = `${event.clientY}px`;
           document.body.appendChild(dot);
-          window.setTimeout(() => dot.remove(), 160);
+          window.setTimeout(() => dot.remove(), 140);
         }}
         onPointerMove={(event) => {
           if (!stroke.current.length) return;
-          const next = point(event);
+          const here = point(event);
           const last = stroke.current[stroke.current.length - 1];
-          if (Math.hypot(next.x - last.x, next.y - last.y) > 0.012) stroke.current.push(next);
+          if (Math.hypot(here.x - last.x, here.y - last.y) > 0.008) stroke.current.push(here);
         }}
         onPointerUp={() => {
           const points = stroke.current;
