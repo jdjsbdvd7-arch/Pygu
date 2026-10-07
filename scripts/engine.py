@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,27 +13,29 @@ inbox = ""
 frame_path = ""
 
 
-def read_frame():
-    try:
-        data = open(frame_path, "rb").read()
-    except OSError:
-        return b""
-    if len(data) < 4 or not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9"):
-        return b""
-    return data
-
-
-def capture_loop():
-    last = b""
+def capture_loop(udid):
+    jpeg = "/tmp/pygu-frame.jpg"
     while True:
-        data = read_frame()
-        if data and data != last:
-            last = data
+        try:
+            shot = subprocess.run(
+                ["xcrun", "simctl", "io", udid, "screenshot", "--type=jpeg", "--mask=ignored", jpeg],
+                capture_output=True,
+            )
+            if shot.returncode != 0:
+                subprocess.run(
+                    ["xcrun", "simctl", "io", udid, "screenshot", jpeg],
+                    check=True,
+                    capture_output=True,
+                )
+            data = open(jpeg, "rb").read()
+            if data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
+                with lock:
+                    state["image"] = data
+                    state["error"] = ""
+        except Exception as exc:
             with lock:
-                state["image"] = data
-                state["kind"] = "image/jpeg"
-                state["error"] = ""
-        time.sleep(0.02)
+                state["error"] = str(exc)
+        time.sleep(0.05)
 
 
 def enqueue(payload):
@@ -168,7 +171,7 @@ def main():
     args = parser.parse_args()
     inbox = args.inbox
     frame_path = args.frames
-    threading.Thread(target=capture_loop, daemon=True).start()
+    threading.Thread(target=capture_loop, args=(args.udid,), daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler())
     print(f"engine listening on {args.port}", flush=True)
     server.serve_forever()

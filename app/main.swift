@@ -20,34 +20,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
             self?.shell.drain()
         }
-        Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.publishFrame()
-        }
         return true
-    }
-
-    func publishFrame() {
-        guard let window else { return }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 2
-        format.opaque = true
-        let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
-            window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
-        }
-        guard let data = image.jpegData(compressionQuality: 0.42) else { return }
-        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let url = folder.appendingPathComponent("frame.jpg")
-        let temporary = folder.appendingPathComponent("frame.tmp")
-        do {
-            try data.write(to: temporary, options: .atomic)
-            if FileManager.default.fileExists(atPath: url.path) {
-                _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
-            } else {
-                try FileManager.default.moveItem(at: temporary, to: url)
-            }
-        } catch {
-            return
-        }
     }
 }
 
