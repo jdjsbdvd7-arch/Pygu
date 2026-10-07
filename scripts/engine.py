@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -39,33 +40,44 @@ def capture_loop(udid, path):
 
 
 def idb_bin():
-    for candidate in (shutil.which("idb"), "/opt/homebrew/bin/idb", "/usr/local/bin/idb"):
-        if candidate and shutil.which(candidate if "/" not in candidate else None) or (
-            candidate and candidate.startswith("/") and shutil.os.path.isfile(candidate)
-        ):
+    candidates = []
+    found = shutil.which("idb")
+    if found:
+        candidates.append(found)
+    candidates.extend(["/opt/homebrew/bin/idb", "/usr/local/bin/idb"])
+    py = os.path.expanduser("~/Library/Python")
+    if os.path.isdir(py):
+        for root, _dirs, files in os.walk(py):
+            if "idb" in files:
+                candidates.append(os.path.join(root, "idb"))
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
             return candidate
     return None
 
 
 def tap(udid, x_norm, y_norm):
-    with lock:
-        width, height = state["width"], state["height"]
-    if width < 2 or height < 2:
-        return False, "no frame yet"
-    scale = 3 if width >= 1000 else 2
-    x = int((x_norm * width) / scale)
-    y = int((y_norm * height) / scale)
-    binary = idb_bin()
-    if not binary:
-        return False, "tap bridge is not installed yet"
-    proc = subprocess.run(
-        [binary, "ui", "tap", str(x), str(y), "--udid", udid],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        return False, (proc.stderr or proc.stdout or "tap failed").strip()
-    return True, f"{x},{y}"
+    try:
+        with lock:
+            width, height = state["width"], state["height"]
+        if width < 2 or height < 2:
+            return False, "no frame yet"
+        scale = 3 if width >= 1000 else 2
+        x = int((x_norm * width) / scale)
+        y = int((y_norm * height) / scale)
+        binary = idb_bin()
+        if not binary:
+            return False, "tap bridge is not installed yet"
+        proc = subprocess.run(
+            [binary, "ui", "tap", str(x), str(y), "--udid", udid],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return False, (proc.stderr or proc.stdout or "tap failed").strip()
+        return True, f"{x},{y}"
+    except Exception as exc:
+        return False, str(exc)
 
 
 def make_handler(udid):
@@ -106,25 +118,24 @@ def make_handler(udid):
             self.end(200, b"ok", "text/plain")
 
         def do_POST(self):
-            path = self.path.split("?", 1)[0]
-            if path != "/tap":
-                self.end(404, b"", "text/plain")
-                return
-            length = int(self.headers.get("content-length", "0") or 0)
-            raw = self.rfile.read(length) if length else b"{}"
             try:
+                path = self.path.split("?", 1)[0]
+                if path != "/tap":
+                    self.end(404, b"", "text/plain")
+                    return
+                length = int(self.headers.get("content-length", "0") or 0)
+                raw = self.rfile.read(length) if length else b"{}"
                 body = json.loads(raw.decode() or "{}")
                 x = float(body.get("x", -1))
                 y = float(body.get("y", -1))
-            except Exception:
-                self.end(400, b"bad json", "text/plain")
-                return
-            if not (0 <= x <= 1 and 0 <= y <= 1):
-                self.end(400, b"bad point", "text/plain")
-                return
-            ok, detail = tap(udid, x, y)
-            code = 200 if ok else 503
-            self.end(code, json.dumps({"ok": ok, "detail": detail}), "application/json")
+                if not (0 <= x <= 1 and 0 <= y <= 1):
+                    self.end(400, b"bad point", "text/plain")
+                    return
+                ok, detail = tap(udid, x, y)
+                code = 200 if ok else 503
+                self.end(code, json.dumps({"ok": ok, "detail": detail}), "application/json")
+            except Exception as exc:
+                self.end(500, json.dumps({"ok": False, "detail": str(exc)}), "application/json")
 
     return Handler
 
