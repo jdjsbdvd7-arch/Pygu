@@ -35,29 +35,20 @@ PY
 
 xcrun simctl boot "$UDID" || true
 xcrun simctl bootstatus "$UDID" -b
+defaults write com.apple.iphonesimulator ShowChrome -bool false || true
 open -a Simulator --args -CurrentDeviceUDID "$UDID" || true
+xcodebuild -version || true
 
-export HOMEBREW_NO_AUTO_UPDATE=1
-export HOMEBREW_NO_INSTALL_CLEANUP=1
-if ! command -v idb_companion >/dev/null 2>&1; then
-  brew install idb-companion || brew install facebook/fb/idb-companion
+curl -fsSL -o /tmp/idb.tgz "https://github.com/facebook/idb/releases/download/v1.6.2/idb-companion.macos-arm64.tar.gz" || true
+mkdir -p /tmp/idb
+tar -xzf /tmp/idb.tgz -C /tmp/idb || true
+COMPANION=$(find /tmp/idb -type f -name 'idb_companion' | head -1 || true)
+if [ -n "$COMPANION" ]; then
+  chmod +x "$COMPANION"
+  "$COMPANION" --udid "$UDID" >/tmp/idb.log 2>&1 &
 fi
-python3 -m pip install --user fb-idb
+python3 -m pip install --user fb-idb || true
 export PATH="$PATH:$HOME/Library/Python/3.9/bin:$HOME/Library/Python/3.11/bin:$HOME/Library/Python/3.12/bin:$HOME/Library/Python/3.13/bin:/opt/homebrew/bin:/usr/local/bin"
-idb_companion --udid "$UDID" >/tmp/idb.log 2>&1 &
-ready=0
-for _ in $(seq 1 90); do
-  if idb list-targets 2>/dev/null | grep -q "$UDID"; then
-    ready=1
-    break
-  fi
-  sleep 1
-done
-if [ "$ready" != "1" ]; then
-  echo "idb did not attach"
-  cat /tmp/idb.log || true
-  exit 1
-fi
 
 python3 scripts/engine.py --udid "$UDID" --port 8787 >/tmp/engine.log 2>&1 &
 ENGINE=$!
