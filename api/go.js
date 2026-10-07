@@ -16,7 +16,8 @@ async function tunnel() {
 export default async function handler(req, res) {
   const op = new URL(req.url, "http://pygu.local").searchParams.get("op") || "frame";
   const query = new URL(req.url, "http://pygu.local").searchParams;
-  const base = await tunnel();
+  const via = query.get("via") || "";
+  const base = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(via) ? via : await tunnel();
   if (!base) {
     res.statusCode = 404;
     res.setHeader("cache-control", "no-store");

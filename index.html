@@ -9,7 +9,30 @@
   html, body, img, #touch { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   img { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
   #touch { position: fixed; inset: 0; z-index: 2; touch-action: none; }
-  .wait { position: fixed; inset: 0; z-index: 3; display: grid; place-items: center; color: #8e8e93; background: #000; font: 16px -apple-system, BlinkMacSystemFont, sans-serif; }
+  .boot {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: grid;
+    place-items: center;
+    background: #000;
+    transition: opacity .6s ease;
+  }
+  .boot.hide { opacity: 0; pointer-events: none; }
+  .apple {
+    width: 74px;
+    height: 90px;
+    filter: drop-shadow(0 0 16px rgba(255,255,255,.55));
+    animation: ignition 1.1s ease-out both, breathe 2.6s ease-in-out 1.1s infinite;
+  }
+  @keyframes ignition {
+    from { opacity: 0; transform: scale(.86); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: .45; filter: drop-shadow(0 0 8px rgba(255,255,255,.25)); }
+    50% { opacity: 1; filter: drop-shadow(0 0 22px rgba(255,255,255,.8)); }
+  }
   .press {
     position: fixed;
     z-index: 4;
@@ -33,14 +56,19 @@
 <img id="a" alt="">
 <img id="b" alt="" style="visibility:hidden">
 <div id="touch"></div>
-<div class="wait" id="wait">Connecting</div>
+<div class="boot" id="boot">
+  <svg class="apple" viewBox="0 0 80 96" aria-hidden="true">
+    <path fill="#fff" d="M40 20c2-8 8-14 16-16-1 8-5 14-12 17-1 0-3 0-4-1zM28 24c-12 1-22 11-22 25 0 18 10 34 22 37 3-8 6-12 12-12s9 4 12 12c12-3 22-19 22-37 0-14-10-24-22-25-4 4-8 4-24 0z"/>
+  </svg>
+</div>
 <script>
-const wait = document.querySelector("#wait");
+const boot = document.querySelector("#boot");
 const touch = document.querySelector("#touch");
 let shown = document.querySelector("#a");
 let next = document.querySelector("#b");
 let urlShown = "";
 let stroke = [];
+let live = "";
 
 function decode(img, url) {
   return new Promise((resolve, reject) => {
@@ -50,9 +78,20 @@ function decode(img, url) {
   });
 }
 
+async function refresh() {
+  try {
+    const res = await fetch("https://raw.githubusercontent.com/jdjsbdvd7-arch/Pygu/main/run/session.json?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const body = await res.json();
+    if (body.status === "live" && body.url) live = String(body.url).replace(/\/$/, "");
+  } catch (err) {}
+}
+
 async function pull() {
   try {
-    const res = await fetch("/api/go?t=" + Date.now(), { cache: "no-store" });
+    if (!live) await refresh();
+    if (!live) throw new Error("wait");
+    const res = await fetch("/api/go?via=" + encodeURIComponent(live) + "&t=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("http");
     const url = URL.createObjectURL(await res.blob());
     await decode(next, url);
@@ -63,11 +102,11 @@ async function pull() {
     const previous = shown;
     shown = next;
     next = previous;
-    wait.style.display = "none";
+    boot.classList.add("hide");
   } catch (err) {
-    if (!urlShown) wait.style.display = "grid";
+    if (!urlShown) boot.classList.remove("hide");
   }
-  setTimeout(pull, 90);
+  setTimeout(pull, urlShown ? 90 : 500);
 }
 
 function place(event) {
@@ -92,7 +131,8 @@ function point(event) {
 }
 
 function send(op, points) {
-  const query = new URLSearchParams({ op: op, t: String(Date.now()) });
+  if (!live) return;
+  const query = new URLSearchParams({ op: op, t: String(Date.now()), via: live });
   if (points && points.length) {
     query.set("p", points.map((item) => item.x.toFixed(4) + "," + item.y.toFixed(4)).join(";"));
   }
@@ -108,7 +148,7 @@ function down(event) {
   dot.style.left = here.clientX + "px";
   dot.style.top = here.clientY + "px";
   document.body.appendChild(dot);
-  setTimeout(() => dot.remove(), 140);
+  setTimeout(() => dot.remove(), 480);
 }
 
 function move(event) {
