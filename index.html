@@ -6,180 +6,130 @@
 <title>Pygu</title>
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; min-height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  button, input { font: inherit; color: inherit; }
-  .ios { max-width: 430px; margin: 0 auto; min-height: 100dvh; padding-bottom: 3rem; }
-  .nav { padding: 3.4rem 1.25rem 0.35rem; }
-  .nav h1 { margin: 0; font-size: 2.15rem; font-weight: 700; letter-spacing: -0.03em; }
-  .profile, .group { margin: 0.7rem 1rem 0; background: #1c1c1e; border-radius: 12px; overflow: hidden; }
-  .profile-cell, .cell, .add { display: flex; align-items: center; min-height: 44px; padding: 0 1rem; color: inherit; text-decoration: none; border-top: 0.5px solid #38383a; }
-  .group > :first-child, .profile-cell { border-top: 0; }
-  .profile-cell { gap: 0.85rem; min-height: 78px; }
-  .avatar { width: 3.6rem; height: 3.6rem; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(#8e8e93, #636366); font-size: 1.5rem; font-weight: 600; }
-  .who { display: grid; flex: 1; }
-  .who strong { font-size: 1.2rem; }
-  .who small, .cell b { color: #8e8e93; font-weight: 400; }
-  .cell { justify-content: space-between; font-size: 1.05rem; }
-  .cell:active, .add:active { background: #2c2c2e; }
-  .chev::after { content: "›"; color: #636366; font-size: 1.4rem; }
-  section h2 { margin: 1.35rem 2rem 0.35rem; color: #8e8e93; font-size: 0.82rem; font-weight: 400; text-transform: uppercase; }
-  .screen-row { display: grid; justify-items: center; padding: 0.85rem 0 1rem; }
-  .device { width: min(292px, 78%); padding: 9px; border-radius: 40px; background: linear-gradient(#3a3a40, #111114 42%, #050506); box-shadow: inset 0 0 0 1.5px rgb(255 255 255 / 16%), 0 18px 40px rgb(0 0 0 / 55%); }
-  .screen { position: relative; aspect-ratio: 390 / 844; border-radius: 31px; overflow: hidden; background: #000; }
-  .screen img, .idle { width: 100%; height: 100%; }
-  .screen img { object-fit: fill; display: block; }
-  .idle { position: absolute; inset: 0; display: grid; place-items: center; color: #8e8e93; }
-  .press { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: rgb(255 255 255 / 62%); pointer-events: none; }
-  .rig { display: flex; justify-content: center; padding: 0 0 0.85rem; }
-  .rig button { border: 0; background: #2c2c2e; color: #fff; min-height: 32px; padding: 0 1.1rem; border-radius: 16px; font-size: 0.92rem; }
-  .add { gap: 0.5rem; }
-  .add input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 0.75rem 0; outline: none; font-size: 1.05rem; }
-  .add button { border: 0; background: transparent; color: #0a84ff; font-size: 1.05rem; padding: 0; }
+  html, body { margin: 0; min-height: 100%; background: #ececee; color: #1d1d1f; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  button { font: inherit; color: inherit; }
+  body { background-image: radial-gradient(#d7d7db 1px, transparent 1px); background-size: 18px 18px; }
+  .stage { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem 1rem 2rem; }
+  .row { display: flex; align-items: center; gap: 1.1rem; }
+  .device { width: min(320px, 72vw); padding: 11px; border-radius: 46px; background: #111; box-shadow: 0 24px 60px rgb(0 0 0 / 18%), inset 0 0 0 2px #2a2a2a; }
+  .screen { position: relative; border-radius: 36px; overflow: hidden; background: #000; }
+  .screen img { width: 100%; height: auto; display: block; touch-action: none; }
+  .idle { aspect-ratio: 390 / 844; display: grid; place-items: center; color: #8e8e93; }
+  .press { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 50%; background: rgb(0 0 0 / 18%); pointer-events: none; }
+  .rail { display: grid; gap: 0.55rem; padding: 0.55rem; border-radius: 22px; background: #fff; box-shadow: 0 10px 30px rgb(0 0 0 / 8%); }
+  .rail button, .spin { width: 48px; height: 48px; border: 0; border-radius: 14px; background: #fff; display: grid; place-items: center; }
+  .rail button.on { background: #e8e8ed; }
+  .rail button + button { box-shadow: inset 0 1px 0 #eee; }
+  .spin { margin: 1rem auto 0; border-radius: 50%; background: #fff; box-shadow: 0 10px 30px rgb(0 0 0 / 8%); }
+  .bar { position: fixed; left: 0; right: 0; top: 0; display: flex; justify-content: space-between; padding: 0.8rem 1rem; font-size: 0.85rem; color: #6e6e73; }
+  a { color: inherit; }
 </style>
 </head>
 <body>
-<main class="ios">
-  <header class="nav"><h1>Settings</h1></header>
-  <div class="profile">
-    <div class="profile-cell">
-      <span class="avatar">P</span>
-      <span class="who"><strong>Pygu</strong><small>iPhone Simulator</small></span>
-      <span class="chev"></span>
-    </div>
-  </div>
-  <section>
-    <h2>Screen</h2>
-    <div class="group">
-      <div class="screen-row">
-        <div class="device"><div class="screen" id="screen"><img id="feed" alt="iPhone" style="display:none"><div class="idle" id="idle">No session</div></div></div>
+<div class="bar"><span id="status">Off</span><a href="https://github.com/jdjsbdvd7-arch/Pygu/actions/workflows/sim.yml">Start</a></div>
+<main class="stage">
+  <div>
+    <div class="row">
+      <div class="device">
+        <div class="screen" id="screen">
+          <img id="feed" alt="iPhone" style="display:none">
+          <div class="idle" id="idle">No session</div>
+        </div>
       </div>
-      <div class="rig"><button type="button" id="home">Home</button></div>
+      <div class="rail">
+        <button type="button" id="home" aria-label="Home"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.7"><path d="M4 11.5 12 4l8 7.5"/><path d="M7 10.5V20h10v-9.5"/></svg></button>
+        <button type="button" id="shot" aria-label="Screenshot"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.7"><path d="M8 7h2l1.2-1.5h3.6L16 7h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13" r="3.2"/></svg></button>
+        <button type="button" id="keys" aria-label="Keyboard"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.7"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M12 10h.01M17 10h.01M7 14h10"/></svg></button>
+        <button type="button" id="lock" aria-label="Lock"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.7"><rect x="6" y="11" width="12" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
+      </div>
     </div>
-  </section>
-  <section>
-    <h2>Applications</h2>
-    <div class="group" id="apps"></div>
-    <form class="group add" id="add">
-      <input id="name" placeholder="Application name" maxlength="24">
-      <button type="submit">Add</button>
-    </form>
-  </section>
-  <section>
-    <h2>Session</h2>
-    <div class="group">
-      <div class="cell"><span>Status</span><b id="status">Off</b></div>
-      <a class="cell" href="https://github.com/jdjsbdvd7-arch/Pygu/actions/workflows/sim.yml">Start<span class="chev"></span></a>
-    </div>
-  </section>
+    <button class="spin" type="button" id="rotate" aria-label="Rotate"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1.7"><path d="M20 12a8 8 0 1 1-2.2-5.5"/><path d="M20 4v5h-5"/></svg></button>
+  </div>
 </main>
 <script>
 const SESSION = "https://raw.githubusercontent.com/jdjsbdvd7-arch/Pygu/main/run/session.json";
-const BUILTIN = ["Settings", "Notes", "Clock"];
-const appsEl = document.querySelector("#apps");
 const screen = document.querySelector("#screen");
 const feed = document.querySelector("#feed");
 const idle = document.querySelector("#idle");
 const statusEl = document.querySelector("#status");
-let apps = BUILTIN.slice();
 let live = "";
 let stroke = [];
-let playing = false;
-
-function saved() {
-  try { return JSON.parse(localStorage.getItem("pygu-apps") || "[]"); }
-  catch (err) { return []; }
-}
-apps = BUILTIN.concat(saved().filter((name) => !BUILTIN.includes(name)));
-
-function renderApps() {
-  appsEl.innerHTML = apps.map((name) => '<div class="cell"><span></span><span class="chev"></span></div>').join("");
-  appsEl.querySelectorAll(".cell span:first-child").forEach((node, index) => { node.textContent = apps[index]; });
-}
-renderApps();
+let typing = false;
+let lastUrl = "";
 
 function showIdle(text) {
   live = "";
-  playing = false;
   feed.style.display = "none";
   idle.style.display = "grid";
   idle.textContent = text;
 }
 
-function play(url) {
-  if (live === url) return;
-  live = url;
-  idle.textContent = "Connecting";
-  const ctrl = new AbortController();
-  fetch(url + "/stream", { signal: ctrl.signal }).then(async (res) => {
-    const reader = res.body.getReader();
-    let buf = new Uint8Array(0);
-    let current = "";
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done || !chunk.value) break;
-      const next = new Uint8Array(buf.length + chunk.value.length);
-      next.set(buf);
-      next.set(chunk.value, buf.length);
-      buf = next;
-      while (buf.length >= 4) {
-        const size = new DataView(buf.buffer, buf.byteOffset, 4).getUint32(0);
-        if (size < 100 || size > 2000000 || buf.length < size + 4) break;
-        const jpeg = buf.slice(4, size + 4);
-        buf = buf.slice(size + 4);
-        const blob = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
-        if (current) URL.revokeObjectURL(current);
-        current = blob;
-        feed.src = blob;
-        feed.style.display = "block";
-        idle.style.display = "none";
-        playing = true;
-      }
-    }
-  }).catch(() => {});
+async function frame() {
+  if (!live) return;
+  try {
+    const res = await fetch(live + "/frame?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const next = URL.createObjectURL(blob);
+    if (lastUrl) URL.revokeObjectURL(lastUrl);
+    lastUrl = next;
+    feed.src = next;
+    feed.style.display = "block";
+    idle.style.display = "none";
+  } catch (err) {}
 }
 
-function norm(event) {
+function point(event) {
   const rect = feed.getBoundingClientRect();
   return { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height };
 }
 feed.addEventListener("pointerdown", (event) => {
   feed.setPointerCapture(event.pointerId);
-  stroke = [norm(event)];
+  stroke = [point(event)];
   const rect = feed.getBoundingClientRect();
   const dot = document.createElement("span");
   dot.className = "press";
   dot.style.left = (event.clientX - rect.left) + "px";
   dot.style.top = (event.clientY - rect.top) + "px";
   screen.appendChild(dot);
-  setTimeout(() => dot.remove(), 280);
+  setTimeout(() => dot.remove(), 220);
 });
 feed.addEventListener("pointermove", (event) => {
   if (!stroke.length) return;
-  const next = norm(event);
+  const next = point(event);
   const last = stroke[stroke.length - 1];
   if (Math.hypot(next.x - last.x, next.y - last.y) > 0.012) stroke.push(next);
 });
-feed.addEventListener("pointerup", async () => {
+feed.addEventListener("pointerup", () => {
   const points = stroke;
   stroke = [];
   if (!live || !points.length) return;
-  try {
-    await fetch(live + "/gesture", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ points })
-    });
-  } catch (err) {
-    statusEl.textContent = "Tap missed";
-  }
+  fetch(live + "/gesture", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ points })
+  }).catch(() => { statusEl.textContent = "Tap missed"; });
 });
-document.querySelector("#home").addEventListener("click", () => {
+function press(path) {
   if (!live) return;
-  fetch(live + "/home", { method: "POST" });
+  fetch(live + path, { method: "POST" });
+}
+document.querySelector("#home").addEventListener("click", () => press("/home"));
+document.querySelector("#lock").addEventListener("click", () => press("/lock"));
+document.querySelector("#rotate").addEventListener("click", () => press("/rotate"));
+document.querySelector("#shot").addEventListener("click", () => {
+  if (!feed.src) return;
+  const link = document.createElement("a");
+  link.href = feed.src;
+  link.download = "screen.jpg";
+  link.click();
+});
+document.querySelector("#keys").addEventListener("click", (event) => {
+  typing = !typing;
+  event.currentTarget.classList.toggle("on", typing);
 });
 window.addEventListener("keydown", (event) => {
-  if (event.target.closest("input")) return;
-  if (!live) return;
+  if (!typing || !live) return;
   const text = event.key === "Backspace" ? "\b" : event.key.length === 1 ? event.key : "";
   if (!text) return;
   event.preventDefault();
@@ -197,39 +147,19 @@ async function poll() {
     const body = await res.json();
     if (body.status === "live" && body.url) {
       statusEl.textContent = "Live";
-      play(body.url.replace(/\/$/, ""));
-      return;
+      live = body.url.replace(/\/$/, "");
+      idle.textContent = "Connecting";
+    } else {
+      statusEl.textContent = "Off";
+      showIdle("No session");
     }
-    statusEl.textContent = "Off";
-    showIdle("No session");
   } catch (err) {
     statusEl.textContent = "Off";
-    showIdle("No session");
   }
 }
 poll();
 setInterval(poll, 4000);
-
-document.querySelector("#add").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const input = document.querySelector("#name");
-  const name = input.value.trim().slice(0, 24);
-  if (!name || apps.includes(name)) return;
-  apps.push(name);
-  input.value = "";
-  localStorage.setItem("pygu-apps", JSON.stringify(apps.filter((item) => !BUILTIN.includes(item))));
-  renderApps();
-  if (!live) return;
-  try {
-    await fetch(live + "/app", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name })
-    });
-  } catch (err) {
-    statusEl.textContent = "App was not sent";
-  }
-});
+setInterval(frame, 280);
 </script>
 </body>
 </html>

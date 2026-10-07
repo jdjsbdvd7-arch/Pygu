@@ -1,45 +1,65 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+mkdir -p run
 if [ -d /Applications/Xcode.app ]; then
   sudo xcode-select -s /Applications/Xcode.app
 fi
 
-SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
-rm -rf build
-mkdir -p build/Pygu.app run
-cp app/Info.plist build/Pygu.app/Info.plist
-xcrun -sdk iphonesimulator swiftc \
-  -target "${ARCH}-apple-ios17.0-simulator" \
-  -sdk "$SDK" \
-  -framework UIKit \
-  app/main.swift -o build/Pygu.app/Pygu
-codesign --force --sign - --timestamp=none build/Pygu.app
 
 UDID=$(python3 - << 'PY'
-import json, subprocess
+import json, re, subprocess
 raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"])
 data = json.loads(raw)
+best = ""
+rank = (-1, -1, -1)
 for runtime, devices in data.get("devices", {}).items():
-    if "iOS" not in runtime:
+    found = re.search(r"iOS-(\d+)-(\d+)", runtime)
+    if not found:
         continue
+    major, minor = int(found.group(1)), int(found.group(2))
     for device in devices:
-        if device.get("isAvailable") and "iPhone" in device.get("name", ""):
-            print(device["udid"])
-            raise SystemExit
-raise SystemExit("no iPhone simulator")
+        name = device.get("name", "")
+        if not device.get("isAvailable") or "iPhone" not in name:
+            continue
+        score = (major, minor, 1 if "Pro" in name and "Max" not in name else 0)
+        if score >= rank:
+            rank = score
+            best = device["udid"]
+if not best:
+    raise SystemExit("no iPhone simulator")
+print(best)
 PY
 )
 
 xcrun simctl boot "$UDID" || true
 xcrun simctl bootstatus "$UDID" -b
-xcrun simctl install "$UDID" build/Pygu.app
-xcrun simctl launch "$UDID" app.pygu.runner
-CONTAINER=$(xcrun simctl get_app_container "$UDID" app.pygu.runner data)
-mkdir -p "$CONTAINER/Documents/inbox"
+open -a Simulator --args -CurrentDeviceUDID "$UDID" || true
 
-python3 scripts/engine.py --udid "$UDID" --inbox "$CONTAINER/Documents/inbox" --frames "$CONTAINER/Documents/frame.jpg" --port 8787 >/tmp/engine.log 2>&1 &
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+if ! command -v idb_companion >/dev/null 2>&1; then
+  brew install idb-companion || brew install facebook/fb/idb-companion
+fi
+python3 -m pip install --user fb-idb
+export PATH="$PATH:$HOME/Library/Python/3.9/bin:$HOME/Library/Python/3.11/bin:$HOME/Library/Python/3.12/bin:$HOME/Library/Python/3.13/bin:/opt/homebrew/bin:/usr/local/bin"
+idb_companion --udid "$UDID" >/tmp/idb.log 2>&1 &
+ready=0
+for _ in $(seq 1 90); do
+  if idb list-targets 2>/dev/null | grep -q "$UDID"; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$ready" != "1" ]; then
+  echo "idb did not attach"
+  cat /tmp/idb.log || true
+  exit 1
+fi
+
+python3 scripts/engine.py --udid "$UDID" --port 8787 >/tmp/engine.log 2>&1 &
 ENGINE=$!
 
 case "$ARCH" in

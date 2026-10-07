@@ -7,30 +7,54 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-state = {"image": b"", "kind": "image/jpeg", "error": ""}
+state = {"image": b"", "kind": "image/jpeg", "error": "", "width": 0, "height": 0}
 lock = threading.Lock()
 inbox = ""
 frame_path = ""
+udid = ""
+landscape = False
 
 
-def capture_loop(udid):
+def jpeg_size(data):
+    index = 2
+    while index < len(data) - 8:
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        if marker in (0xC0, 0xC1, 0xC2):
+            height = int.from_bytes(data[index + 5 : index + 7], "big")
+            width = int.from_bytes(data[index + 7 : index + 9], "big")
+            return width, height
+        if marker in (0xD8, 0xD9):
+            index += 2
+            continue
+        length = int.from_bytes(data[index + 2 : index + 4], "big")
+        index += 2 + max(length, 2)
+    return 0, 0
+
+
+def capture_loop(device):
     jpeg = "/tmp/pygu-frame.jpg"
     while True:
         try:
             shot = subprocess.run(
-                ["xcrun", "simctl", "io", udid, "screenshot", "--type=jpeg", "--mask=ignored", jpeg],
+                ["xcrun", "simctl", "io", device, "screenshot", "--type=jpeg", "--mask=ignored", jpeg],
                 capture_output=True,
             )
             if shot.returncode != 0:
                 subprocess.run(
-                    ["xcrun", "simctl", "io", udid, "screenshot", jpeg],
+                    ["xcrun", "simctl", "io", device, "screenshot", jpeg],
                     check=True,
                     capture_output=True,
                 )
             data = open(jpeg, "rb").read()
             if data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
+                width, height = jpeg_size(data)
                 with lock:
                     state["image"] = data
+                    state["width"] = width
+                    state["height"] = height
                     state["error"] = ""
         except Exception as exc:
             with lock:
@@ -38,16 +62,30 @@ def capture_loop(udid):
         time.sleep(0.05)
 
 
-def enqueue(payload):
-    if not inbox:
-        return False, "inbox is not ready"
-    os.makedirs(inbox, exist_ok=True)
-    path = os.path.join(inbox, f"{time.time_ns()}.json")
-    temporary = path + ".tmp"
-    with open(temporary, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle)
-    os.replace(temporary, path)
-    return True, "queued"
+def device_point(x, y):
+    with lock:
+        width = state["width"]
+        height = state["height"]
+    if width < 10 or height < 10:
+        return None
+    scale = 3 if width >= 900 else 2
+    return int(x * width / scale), int(y * height / scale)
+
+
+def run_idb(args):
+    try:
+        proc = subprocess.run(
+            ["idb", *args, "--udid", udid],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+    except Exception as exc:
+        return False, str(exc)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "idb failed").strip()
+        return False, detail[-300:]
+    return True, "ok"
 
 
 def make_handler():
@@ -115,41 +153,50 @@ def make_handler():
                 length = int(self.headers.get("content-length", "0") or 0)
                 raw = self.rfile.read(length) if length else b"{}"
                 body = json.loads(raw.decode() or "{}")
-                if path == "/tap":
-                    x = float(body.get("x", -1))
-                    y = float(body.get("y", -1))
-                    if not (0 <= x <= 1 and 0 <= y <= 1):
-                        self.end(400, b"bad point", "text/plain")
-                        return
-                    ok, detail = enqueue({"cmd": "tap", "x": x, "y": y})
-                elif path == "/gesture":
+                if path == "/gesture":
                     points = body.get("points")
                     if not isinstance(points, list) or not points:
                         self.end(400, b"bad gesture", "text/plain")
                         return
-                    clean = []
+                    mapped = []
                     for point in points[:40]:
                         x = float(point.get("x", -1))
                         y = float(point.get("y", -1))
                         if not (0 <= x <= 1 and 0 <= y <= 1):
                             self.end(400, b"bad point", "text/plain")
                             return
-                        clean.append({"x": x, "y": y})
-                    ok, detail = enqueue({"cmd": "gesture", "points": clean})
+                        spot = device_point(x, y)
+                        if not spot:
+                            self.end(503, json.dumps({"ok": False, "detail": "screen not ready"}), "application/json")
+                            return
+                        mapped.append(spot)
+                    x0, y0 = mapped[0]
+                    x1, y1 = mapped[-1]
+                    if abs(x1 - x0) < 8 and abs(y1 - y0) < 8:
+                        ok, detail = run_idb(["ui", "tap", str(x1), str(y1)])
+                    else:
+                        ok, detail = run_idb(["ui", "swipe", str(x0), str(y0), str(x1), str(y1)])
                 elif path == "/home":
-                    ok, detail = enqueue({"cmd": "home"})
+                    ok, detail = run_idb(["ui", "button", "HOME"])
+                elif path == "/lock":
+                    ok, detail = run_idb(["ui", "button", "LOCK"])
                 elif path == "/type":
-                    text = str(body.get("text", ""))[:8]
+                    text = str(body.get("text", ""))[:32]
                     if not text:
                         self.end(400, b"bad text", "text/plain")
                         return
-                    ok, detail = enqueue({"cmd": "type", "text": text})
-                elif path == "/app":
-                    name = str(body.get("name", "")).strip()[:24]
-                    if not name:
-                        self.end(400, b"bad name", "text/plain")
-                        return
-                    ok, detail = enqueue({"cmd": "add", "name": name})
+                    ok, detail = run_idb(["ui", "text", text])
+                elif path == "/rotate":
+                    global landscape
+                    landscape = not landscape
+                    side = "landscapeLeft" if landscape else "portrait"
+                    proc = subprocess.run(
+                        ["xcrun", "simctl", "ui", udid, "orientation", side],
+                        capture_output=True,
+                        text=True,
+                    )
+                    ok = proc.returncode == 0
+                    detail = "ok" if ok else (proc.stderr or proc.stdout or "rotate failed")[-200:]
                 else:
                     self.end(404, b"", "text/plain")
                     return
@@ -162,15 +209,12 @@ def make_handler():
 
 
 def main():
-    global inbox, frame_path
+    global udid
     parser = argparse.ArgumentParser()
     parser.add_argument("--udid", required=True)
-    parser.add_argument("--inbox", required=True)
-    parser.add_argument("--frames", required=True)
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
-    inbox = args.inbox
-    frame_path = args.frames
+    udid = args.udid
     threading.Thread(target=capture_loop, args=(args.udid,), daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler())
     print(f"engine listening on {args.port}", flush=True)
