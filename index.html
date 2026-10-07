@@ -106,7 +106,7 @@ async function pull() {
   } catch (err) {
     if (!urlShown) boot.classList.remove("hide");
   }
-  setTimeout(pull, urlShown ? 90 : 500);
+  setTimeout(pull, urlShown ? 20 : 400);
 }
 
 function place(event) {

@@ -4,6 +4,7 @@ import glob
 import json
 import os
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -37,33 +38,76 @@ def jpeg_size(data):
 
 
 def capture_loop(device):
+    raw = "/tmp/pygu-raw.jpg"
     jpeg = "/tmp/pygu-frame.jpg"
     while True:
         try:
             shot = subprocess.run(
-                ["xcrun", "simctl", "io", device, "screenshot", "--type=jpeg", "--mask=ignored", jpeg],
+                ["xcrun", "simctl", "io", device, "screenshot", "--type=jpeg", "--mask=ignored", raw],
                 capture_output=True,
                 timeout=8,
             )
             if shot.returncode != 0:
                 subprocess.run(
-                    ["xcrun", "simctl", "io", device, "screenshot", jpeg],
+                    ["xcrun", "simctl", "io", device, "screenshot", raw],
                     check=True,
                     capture_output=True,
                     timeout=8,
                 )
-            data = open(jpeg, "rb").read()
-            if data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
-                width, height = jpeg_size(data)
-                with lock:
-                    state["image"] = data
-                    state["width"] = width
-                    state["height"] = height
-                    state["error"] = ""
+            data = open(raw, "rb").read()
+            if not (data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")):
+                time.sleep(0.1)
+                continue
+            width, height = jpeg_size(data)
+            squeezed = subprocess.run(
+                [
+                    "sips",
+                    "-s",
+                    "format",
+                    "jpeg",
+                    "-s",
+                    "formatOptions",
+                    "42",
+                    "--resampleWidth",
+                    "860",
+                    raw,
+                    "--out",
+                    jpeg,
+                ],
+                capture_output=True,
+                timeout=4,
+            )
+            if squeezed.returncode == 0:
+                smaller = open(jpeg, "rb").read()
+                if smaller.startswith(b"\xff\xd8"):
+                    data = smaller
+            with lock:
+                state["image"] = data
+                state["width"] = width
+                state["height"] = height
+                state["error"] = ""
         except Exception as exc:
             with lock:
                 state["error"] = str(exc)
-        time.sleep(0.05)
+            time.sleep(0.2)
+
+
+def touch_send(payload):
+    try:
+        with socket.create_connection(("127.0.0.1", 8791), timeout=0.2) as sock:
+            sock.sendall((json.dumps(payload) + "\n").encode())
+            sock.settimeout(0.45)
+            ack = b""
+            while b"\n" not in ack and len(ack) < 240:
+                chunk = sock.recv(240)
+                if not chunk:
+                    break
+                ack += chunk
+        text = ack.decode().strip()
+        print("[tap]", text or "touch silent", flush=True)
+        return text == "ok", text or "touch silent"
+    except Exception as exc:
+        return False, str(exc)
 
 
 def device_point(nx, ny):
@@ -287,8 +331,10 @@ def make_handler():
                     if abs(x1 - x0) < 0.02 and abs(y1 - y0) < 0.02:
                         spot = device_point(x1, y1)
                         ok, detail = (False, "")
-                        if spot and shutil.which("idb"):
-                            ok, detail = run_idb(["ui", "tap", str(spot[0]), str(spot[1])])
+                        if spot:
+                            ok, detail = touch_send({"op": "tap", "x": spot[0], "y": spot[1]})
+                        if not ok and spot and idb_bin():
+                            ok, detail = run_idb(["ui", "tap", str(spot[0]), str(spot[1]), "--duration", "0.02"])
                         if not ok:
                             ok, detail = pointer(x1, y1)
                     else:
@@ -296,12 +342,36 @@ def make_handler():
                         end = device_point(x1, y1)
                         ok = False
                         detail = ""
-                        if start and end and shutil.which("idb"):
-                            ok, detail = run_idb(["ui", "swipe", str(start[0]), str(start[1]), str(end[0]), str(end[1])])
+                        if start and end:
+                            ok, detail = touch_send(
+                                {
+                                    "op": "swipe",
+                                    "x": start[0],
+                                    "y": start[1],
+                                    "x2": end[0],
+                                    "y2": end[1],
+                                    "duration": 0.09,
+                                }
+                            )
+                        if not ok and start and end and idb_bin():
+                            ok, detail = run_idb(
+                                [
+                                    "ui",
+                                    "swipe",
+                                    str(start[0]),
+                                    str(start[1]),
+                                    str(end[0]),
+                                    str(end[1]),
+                                    "--duration",
+                                    "0.09",
+                                ]
+                            )
                         if not ok:
                             ok, detail = pointer(x0, y0, x1, y1)
                 elif path == "/home":
-                    ok, detail = run_idb(["ui", "button", "HOME"])
+                    ok, detail = touch_send({"op": "button", "name": "HOME"})
+                    if not ok:
+                        ok, detail = run_idb(["ui", "button", "HOME"])
                     if not ok:
                         ok, detail = menu("Home")
                 elif path == "/lock":

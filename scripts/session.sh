@@ -58,10 +58,10 @@ if [ -n "$IDB" ]; then
 fi
 export PATH="/tmp/idb:$HOME/bin:$PATH:/opt/homebrew/bin:/usr/local/bin"
 
+python3 -u scripts/touch.py --udid "$UDID" >/tmp/touch.log 2>&1 &
 python3 -u scripts/engine.py --udid "$UDID" --port 8787 >/tmp/engine.log 2>&1 &
 ENGINE=$!
-tail -n +1 -f /tmp/engine.log &
-ENGINE=$!
+tail -n +1 -f /tmp/engine.log /tmp/touch.log &
 
 case "$ARCH" in
   arm64) CFARCH=arm64 ;;
