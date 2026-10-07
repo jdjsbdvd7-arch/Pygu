@@ -51,7 +51,7 @@ export default async function handler(req, res) {
     return;
   }
   if (req.method === "GET") {
-    const img = await fetch(base + "/frame", { cache: "no-store" });
+    const img = await fetch(base + "/frame?t=" + Date.now(), { cache: "no-store" });
     if (!img.ok) {
       cached = { url: "", at: 0 };
       res.statusCode = 502;
@@ -62,7 +62,9 @@ export default async function handler(req, res) {
     const bytes = Buffer.from(await img.arrayBuffer());
     res.statusCode = 200;
     res.setHeader("content-type", "image/jpeg");
-    res.setHeader("cache-control", "no-store");
+    res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
+    res.setHeader("cdn-cache-control", "no-store");
+    res.setHeader("vercel-cdn-cache-control", "no-store");
     res.end(bytes);
     return;
   }

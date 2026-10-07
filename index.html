@@ -358,7 +358,23 @@ menu.addEventListener("pointerdown", (event) => {
   if (hit) act(hit.dataset.act);
 });
 
-watch();
+async function chase() {
+  for (;;) {
+    try {
+      if (!live) await refresh();
+      if (!live) throw new Error("wait");
+      const res = await fetch("/api/go?via=" + encodeURIComponent(live) + "&t=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) throw new Error("http");
+      paint(new Uint8Array(await res.arrayBuffer()));
+    } catch (err) {
+      if (!urlShown) boot.classList.remove("hide");
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    }
+  }
+}
+
+chase();
+chase();
 </script>
 </body>
 </html>
