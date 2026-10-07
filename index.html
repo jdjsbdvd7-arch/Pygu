@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pygu</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100dvh; background: #101114; color: #ece7dc; font: 16px/1.4 "Segoe UI", sans-serif; }
+  header, .status { display: flex; justify-content: space-between; padding: 0.85rem 1.1rem; letter-spacing: 0.08em; font-size: 0.75rem; }
+  a { color: #c9893a; }
+  main { display: grid; place-items: center; padding: 1rem; }
+  .glass { width: min(390px, 100%); height: min(844px, calc(100dvh - 7rem)); border-radius: 1.6rem; overflow: hidden; background: #050506; }
+  img, .idle { width: 100%; height: 100%; object-fit: contain; background: #050506; }
+  img { cursor: crosshair; }
+  .idle { display: grid; place-items: center; color: #8d93a0; }
+</style>
+</head>
+<body>
+<header><span>PYGU</span><a href="https://github.com/jdjsbdvd7-arch/Pygu/actions/workflows/sim.yml">Start</a></header>
+<main><div class="glass" id="glass"><div class="idle" id="idle">No session</div></main>
+<p class="status" id="status">No session</p>
+<script>
+const SESSION = "https://raw.githubusercontent.com/jdjsbdvd7-arch/Pygu/main/run/session.json";
+const glass = document.querySelector("#glass");
+const status = document.querySelector("#status");
+let current = "";
+let timer = 0;
+
+function showIdle(text) {
+  if (timer) { clearInterval(timer); timer = 0; }
+  current = "";
+  glass.innerHTML = '<div class="idle" id="idle"></div>';
+  glass.querySelector("#idle").textContent = text;
+  status.textContent = text;
+}
+
+function showLive(url) {
+  if (current === url) return;
+  current = url;
+  const img = document.createElement("img");
+  img.alt = "Simulator";
+  glass.innerHTML = "";
+  glass.appendChild(img);
+  const tick = () => { img.src = url.replace(/\/$/, "") + "/frame?t=" + Date.now(); };
+  tick();
+  if (timer) clearInterval(timer);
+  timer = setInterval(tick, 700);
+  img.addEventListener("click", async (event) => {
+    const rect = img.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+    try {
+      const res = await fetch(url.replace(/\/$/, "") + "/tap", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ x, y })
+      });
+      if (!res.ok) status.textContent = "Tap was not delivered";
+    } catch (err) {
+      status.textContent = "Tap did not reach the runner";
+    }
+  });
+}
+
+async function poll() {
+  try {
+    const res = await fetch(SESSION + "?t=" + Date.now());
+    if (!res.ok) { showIdle("No session"); return; }
+    const body = await res.json();
+    if (body.status === "live" && body.url) {
+      status.textContent = "Live";
+      showLive(body.url);
+      return;
+    }
+    showIdle(body.status || "No session");
+  } catch (err) {
+    showIdle("No session");
+  }
+}
+poll();
+setInterval(poll, 4000);
+</script>
+</body>
+</html>

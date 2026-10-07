@@ -1,0 +1,26 @@
+name: sim
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "scripts/**"
+      - ".github/workflows/sim.yml"
+
+concurrency:
+  group: sim
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  session:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the simulator session
+        run: bash scripts/session.sh
