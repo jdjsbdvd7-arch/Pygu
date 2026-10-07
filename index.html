@@ -2,64 +2,131 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Pygu</title>
 <style>
-  :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100dvh; background: #101114; color: #ece7dc; font: 16px/1.4 "Segoe UI", sans-serif; }
-  header, .status { display: flex; justify-content: space-between; padding: 0.85rem 1.1rem; letter-spacing: 0.08em; font-size: 0.75rem; }
-  a { color: #c9893a; }
-  main { display: grid; place-items: center; padding: 1rem; }
-  .glass { width: min(390px, 100%); height: min(844px, calc(100dvh - 7rem)); border-radius: 1.6rem; overflow: hidden; background: #050506; }
-  img, .idle { width: 100%; height: 100%; object-fit: contain; background: #050506; }
-  img { cursor: crosshair; }
-  .idle { display: grid; place-items: center; color: #8d93a0; }
+  html, body { margin: 0; min-height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  .ios { max-width: 430px; margin: 0 auto; min-height: 100dvh; padding-bottom: 3rem; }
+  .nav { padding: 3.4rem 1.25rem 0.35rem; }
+  .nav h1 { margin: 0; font-size: 2.15rem; font-weight: 700; letter-spacing: -0.03em; }
+  .profile, .group { margin: 0.7rem 1rem 0; background: #1c1c1e; border-radius: 12px; overflow: hidden; }
+  .profile-cell, .cell, .add { display: flex; align-items: center; min-height: 44px; padding: 0 1rem; color: inherit; text-decoration: none; border-top: 0.5px solid #38383a; }
+  .group > :first-child, .profile-cell { border-top: 0; }
+  .profile-cell { gap: 0.85rem; min-height: 78px; }
+  .avatar { width: 3.6rem; height: 3.6rem; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(#8e8e93, #636366); font-size: 1.5rem; font-weight: 600; }
+  .who { display: grid; flex: 1; }
+  .who strong { font-size: 1.2rem; }
+  .who small, .cell b { color: #8e8e93; font-weight: 400; }
+  .cell { justify-content: space-between; font-size: 1.05rem; }
+  .cell:active, .add:active { background: #2c2c2e; }
+  .chev::after { content: "›"; color: #636366; font-size: 1.4rem; }
+  section h2 { margin: 1.35rem 2rem 0.35rem; color: #8e8e93; font-size: 0.82rem; font-weight: 400; text-transform: uppercase; }
+  .screen-row { display: grid; justify-items: center; padding: 0.85rem 0 1rem; }
+  .device { width: min(292px, 78%); padding: 9px; border-radius: 40px; background: linear-gradient(#3a3a40, #111114 42%, #050506); box-shadow: inset 0 0 0 1.5px rgb(255 255 255 / 16%), 0 18px 40px rgb(0 0 0 / 55%); }
+  .screen { position: relative; aspect-ratio: 390 / 844; border-radius: 31px; overflow: hidden; background: #000; }
+  .screen img, .idle { width: 100%; height: 100%; }
+  .screen img { object-fit: fill; display: block; }
+  .idle { display: grid; place-items: center; color: #8e8e93; }
+  .press { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: rgb(255 255 255 / 62%); pointer-events: none; }
+  .add { gap: 0.5rem; }
+  .add input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 0.75rem 0; outline: none; font-size: 1.05rem; }
+  .add button { border: 0; background: transparent; color: #0a84ff; font-size: 1.05rem; padding: 0; }
 </style>
 </head>
 <body>
-<header><span>PYGU</span><a href="https://github.com/jdjsbdvd7-arch/Pygu/actions/workflows/sim.yml">Start</a></header>
-<main><div class="glass" id="glass"><div class="idle" id="idle">No session</div></main>
-<p class="status" id="status">No session</p>
+<main class="ios">
+  <header class="nav"><h1>Settings</h1></header>
+  <div class="profile">
+    <div class="profile-cell">
+      <span class="avatar">P</span>
+      <span class="who"><strong>Pygu</strong><small>iPhone Simulator</small></span>
+      <span class="chev"></span>
+    </div>
+  </div>
+  <section>
+    <h2>Screen</h2>
+    <div class="group">
+      <div class="screen-row">
+        <div class="device"><div class="screen" id="screen"><div class="idle">No session</div></div></div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Applications</h2>
+    <div class="group" id="apps"></div>
+    <form class="group add" id="add">
+      <input id="name" placeholder="Application name" maxlength="24">
+      <button type="submit">Add</button>
+    </form>
+  </section>
+  <section>
+    <h2>Session</h2>
+    <div class="group">
+      <div class="cell"><span>Status</span><b id="status">Off</b></div>
+      <a class="cell" href="https://github.com/jdjsbdvd7-arch/Pygu/actions/workflows/sim.yml">Start<span class="chev"></span></a>
+    </div>
+  </section>
+</main>
 <script>
 const SESSION = "https://raw.githubusercontent.com/jdjsbdvd7-arch/Pygu/main/run/session.json";
-const glass = document.querySelector("#glass");
-const status = document.querySelector("#status");
-let current = "";
+const BUILTIN = ["Settings", "Notes", "Clock"];
+const appsEl = document.querySelector("#apps");
+const screen = document.querySelector("#screen");
+const statusEl = document.querySelector("#status");
+let apps = BUILTIN.slice();
+let live = "";
 let timer = 0;
+
+function saved() {
+  try { return JSON.parse(localStorage.getItem("pygu-apps") || "[]"); }
+  catch (err) { return []; }
+}
+apps = BUILTIN.concat(saved().filter((name) => !BUILTIN.includes(name)));
+
+function renderApps() {
+  appsEl.innerHTML = apps.map((name) => '<div class="cell"><span></span><span class="chev"></span></div>').join("");
+  appsEl.querySelectorAll(".cell span:first-child").forEach((node, index) => { node.textContent = apps[index]; });
+}
+renderApps();
 
 function showIdle(text) {
   if (timer) { clearInterval(timer); timer = 0; }
-  current = "";
-  glass.innerHTML = '<div class="idle" id="idle"></div>';
-  glass.querySelector("#idle").textContent = text;
-  status.textContent = text;
+  live = "";
+  screen.innerHTML = '<div class="idle"></div>';
+  screen.querySelector(".idle").textContent = text;
 }
 
 function showLive(url) {
-  if (current === url) return;
-  current = url;
+  if (live === url && screen.querySelector("img")) return;
+  live = url;
   const img = document.createElement("img");
-  img.alt = "Simulator";
-  glass.innerHTML = "";
-  glass.appendChild(img);
-  const tick = () => { img.src = url.replace(/\/$/, "") + "/frame?t=" + Date.now(); };
+  img.alt = "iPhone";
+  screen.innerHTML = "";
+  screen.appendChild(img);
+  const tick = () => { img.src = url + "/frame?t=" + Date.now(); };
   tick();
   if (timer) clearInterval(timer);
-  timer = setInterval(tick, 700);
-  img.addEventListener("click", async (event) => {
+  timer = setInterval(tick, 500);
+  img.addEventListener("pointerdown", async (event) => {
     const rect = img.getBoundingClientRect();
+    const dot = document.createElement("span");
+    dot.className = "press";
+    dot.style.left = (event.clientX - rect.left) + "px";
+    dot.style.top = (event.clientY - rect.top) + "px";
+    screen.appendChild(dot);
+    setTimeout(() => dot.remove(), 420);
     const x = (event.clientX - rect.left) / rect.width;
     const y = (event.clientY - rect.top) / rect.height;
     try {
-      const res = await fetch(url.replace(/\/$/, "") + "/tap", {
+      await fetch(url + "/tap", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ x, y })
       });
-      if (!res.ok) status.textContent = "Tap was not delivered";
     } catch (err) {
-      status.textContent = "Tap did not reach the runner";
+      statusEl.textContent = "Tap missed";
     }
   });
 }
@@ -67,20 +134,43 @@ function showLive(url) {
 async function poll() {
   try {
     const res = await fetch(SESSION + "?t=" + Date.now());
-    if (!res.ok) { showIdle("No session"); return; }
+    if (!res.ok) { statusEl.textContent = "Off"; showIdle("No session"); return; }
     const body = await res.json();
     if (body.status === "live" && body.url) {
-      status.textContent = "Live";
-      showLive(body.url);
+      statusEl.textContent = "Live";
+      showLive(body.url.replace(/\/$/, ""));
       return;
     }
-    showIdle(body.status || "No session");
+    statusEl.textContent = "Off";
+    showIdle("No session");
   } catch (err) {
+    statusEl.textContent = "Off";
     showIdle("No session");
   }
 }
 poll();
 setInterval(poll, 4000);
+
+document.querySelector("#add").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.querySelector("#name");
+  const name = input.value.trim().slice(0, 24);
+  if (!name || apps.includes(name)) return;
+  apps.push(name);
+  input.value = "";
+  localStorage.setItem("pygu-apps", JSON.stringify(apps.filter((item) => !BUILTIN.includes(item))));
+  renderApps();
+  if (!live) return;
+  try {
+    await fetch(live + "/app", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+  } catch (err) {
+    statusEl.textContent = "App was not sent";
+  }
+});
 </script>
 </body>
 </html>

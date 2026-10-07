@@ -10,12 +10,11 @@ ARCH=$(uname -m)
 rm -rf build
 mkdir -p build/Pygu.app run
 cp app/Info.plist build/Pygu.app/Info.plist
-xcrun -sdk iphonesimulator clang \
-  -fobjc-arc -fmodules \
+xcrun -sdk iphonesimulator swiftc \
   -target "${ARCH}-apple-ios17.0-simulator" \
-  -isysroot "$SDK" \
-  -framework UIKit -framework Foundation \
-  app/main.m -o build/Pygu.app/Pygu
+  -sdk "$SDK" \
+  -framework UIKit \
+  app/main.swift -o build/Pygu.app/Pygu
 codesign --force --sign - --timestamp=none build/Pygu.app
 
 UDID=$(python3 - << 'PY'
@@ -37,10 +36,10 @@ xcrun simctl boot "$UDID" || true
 xcrun simctl bootstatus "$UDID" -b
 xcrun simctl install "$UDID" build/Pygu.app
 xcrun simctl launch "$UDID" app.pygu.runner
+CONTAINER=$(xcrun simctl get_app_container "$UDID" app.pygu.runner data)
+mkdir -p "$CONTAINER/Documents/inbox"
 
-( HOMEBREW_NO_AUTO_UPDATE=1 brew install idb-companion && python3 -m pip install --user fb-idb ) >/tmp/idb-install.log 2>&1 &
-
-python3 scripts/engine.py --udid "$UDID" --port 8787 >/tmp/engine.log 2>&1 &
+python3 scripts/engine.py --udid "$UDID" --inbox "$CONTAINER/Documents/inbox" --port 8787 >/tmp/engine.log 2>&1 &
 ENGINE=$!
 
 case "$ARCH" in
