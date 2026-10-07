@@ -41,12 +41,14 @@ def capture_loop(device):
             shot = subprocess.run(
                 ["xcrun", "simctl", "io", device, "screenshot", "--type=jpeg", "--mask=ignored", jpeg],
                 capture_output=True,
+                timeout=8,
             )
             if shot.returncode != 0:
                 subprocess.run(
                     ["xcrun", "simctl", "io", device, "screenshot", jpeg],
                     check=True,
                     capture_output=True,
+                    timeout=8,
                 )
             data = open(jpeg, "rb").read()
             if data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
