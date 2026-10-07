@@ -38,6 +38,7 @@ xcrun simctl bootstatus "$UDID" -b
 defaults write com.apple.iphonesimulator ShowChrome -bool false || true
 open -a Simulator --args -CurrentDeviceUDID "$UDID" || true
 xcodebuild -version || true
+brew install cliclick || true
 
 curl -fsSL -o /tmp/idb.tgz "https://github.com/facebook/idb/releases/download/v1.6.2/idb-companion.macos-arm64.tar.gz" || true
 mkdir -p /tmp/idb

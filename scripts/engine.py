@@ -113,7 +113,11 @@ def pointer(nx, ny, nx2=None, ny2=None):
             proc = subprocess.run([click, f"c:{x},{y}"], capture_output=True, text=True, timeout=8)
             return proc.returncode == 0, proc.stderr.strip() or "ok"
         proc = subprocess.run(
-            ["osascript", "-e", f'tell application "System Events" to click at {{{x}, {y}}}'],
+            [
+                "osascript",
+                "-e",
+                f'tell application "System Events" to tell process "Simulator" to click at {{{x}, {y}}}',
+            ],
             capture_output=True,
             text=True,
             timeout=8,
