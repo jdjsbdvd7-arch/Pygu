@@ -7,10 +7,26 @@
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
   html, body, img, #touch { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-  img { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  img { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
   #touch { position: fixed; inset: 0; z-index: 2; touch-action: none; }
   .wait { position: fixed; inset: 0; z-index: 3; display: grid; place-items: center; color: #8e8e93; background: #000; font: 16px -apple-system, BlinkMacSystemFont, sans-serif; }
-  .press { position: fixed; z-index: 4; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: rgb(255 255 255 / 35%); pointer-events: none; }
+  .press {
+    position: fixed;
+    z-index: 4;
+    width: 64px;
+    height: 64px;
+    margin: -32px 0 0 -32px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(circle, #fff 0%, rgba(255,255,255,.72) 28%, rgba(255,255,255,.18) 58%, rgba(255,255,255,0) 72%);
+    box-shadow: 0 0 16px 4px rgba(255,255,255,.95), 0 0 42px 14px rgba(255,255,255,.45);
+    animation: sway 460ms ease-out forwards;
+  }
+  @keyframes sway {
+    0% { transform: scale(.25) rotate(-10deg); opacity: 1; }
+    45% { transform: scale(1.05) rotate(7deg); opacity: 1; }
+    100% { transform: scale(1.45) rotate(-4deg); opacity: 0; }
+  }
 </style>
 </head>
 <body>
@@ -64,7 +80,7 @@ function point(event) {
   const rect = shown.getBoundingClientRect();
   const nw = shown.naturalWidth || rect.width;
   const nh = shown.naturalHeight || rect.height;
-  const scale = Math.max(rect.width / nw, rect.height / nh);
+  const scale = Math.min(rect.width / nw, rect.height / nh);
   const width = nw * scale;
   const height = nh * scale;
   const left = rect.left + (rect.width - width) / 2;

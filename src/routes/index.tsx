@@ -63,7 +63,20 @@ function Screen() {
   }, []);
 
   function point(event: ReactPointerEvent<HTMLDivElement>): Point {
-    return { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight };
+    const img = shown.current;
+    if (!img) return { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight };
+    const rect = img.getBoundingClientRect();
+    const nw = img.naturalWidth || rect.width;
+    const nh = img.naturalHeight || rect.height;
+    const scale = Math.min(rect.width / nw, rect.height / nh);
+    const width = nw * scale;
+    const height = nh * scale;
+    const left = rect.left + (rect.width - width) / 2;
+    const top = rect.top + (rect.height - height) / 2;
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - left) / width)),
+      y: Math.min(1, Math.max(0, (event.clientY - top) / height)),
+    };
   }
 
   return (

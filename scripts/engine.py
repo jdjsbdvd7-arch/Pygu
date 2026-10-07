@@ -105,13 +105,36 @@ def screen_click(nx, ny):
     return int(wx + nx * points_w * fitted), int(wy + chrome + ny * points_h * fitted)
 
 
+def display_scale():
+    cached = state.get("scale")
+    if cached:
+        return cached
+    script = """
+use framework "AppKit"
+return (current application's NSScreen's mainScreen()'s backingScaleFactor()) as text
+"""
+    proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=8)
+    try:
+        factor = float((proc.stdout or "").strip())
+    except ValueError:
+        factor = 2.0
+    if factor < 1:
+        factor = 2.0
+    state["scale"] = factor
+    return factor
+
+
 def pointer(nx, ny, nx2=None, ny2=None):
     x, y = screen_click(nx, ny)
+    factor = display_scale()
     click = shutil.which("cliclick")
     if nx2 is None:
         if click:
-            proc = subprocess.run([click, f"c:{x},{y}"], capture_output=True, text=True, timeout=8)
-            return proc.returncode == 0, proc.stderr.strip() or "ok"
+            px, py = int(x * factor), int(y * factor)
+            proc = subprocess.run([click, f"c:{px},{py}"], capture_output=True, text=True, timeout=8)
+            detail = f"cliclick {px},{py} x{factor} from {x},{y}"
+            print("[tap]", detail, proc.returncode, flush=True)
+            return proc.returncode == 0, detail
         proc = subprocess.run(
             [
                 "osascript",
@@ -122,11 +145,20 @@ def pointer(nx, ny, nx2=None, ny2=None):
             text=True,
             timeout=8,
         )
-        return proc.returncode == 0, (proc.stderr or "ok").strip()[-200:]
+        detail = f"applescript {x},{y}" if proc.returncode == 0 else (proc.stderr or "click failed").strip()[-200:]
+        print("[tap]", detail, flush=True)
+        return proc.returncode == 0, detail
     x2, y2 = screen_click(nx2, ny2)
     if click:
-        proc = subprocess.run([click, f"dd:{x},{y}", "w:120", f"du:{x2},{y2}"], capture_output=True, text=True, timeout=8)
-        return proc.returncode == 0, proc.stderr.strip() or "ok"
+        proc = subprocess.run(
+            [click, f"dd:{int(x * factor)},{int(y * factor)}", "w:120", f"du:{int(x2 * factor)},{int(y2 * factor)}"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        detail = f"cliclick drag {int(x * factor)},{int(y * factor)} {int(x2 * factor)},{int(y2 * factor)} x{factor}"
+        print("[tap]", detail, proc.returncode, flush=True)
+        return proc.returncode == 0, detail
     return False, "drag needs cliclick"
 
 
@@ -153,8 +185,12 @@ def run_idb(args):
     except Exception as exc:
         return False, str(exc)
     if proc.returncode != 0:
-        return False, (proc.stderr or proc.stdout or "idb failed").strip()[-300:]
-    return True, "ok"
+        detail = (proc.stderr or proc.stdout or "idb failed").strip()[-300:]
+        print("[tap]", "idb", args, detail, flush=True)
+        return False, detail
+    detail = "idb " + " ".join(args)
+    print("[tap]", detail, flush=True)
+    return True, detail
 
 
 def make_handler():

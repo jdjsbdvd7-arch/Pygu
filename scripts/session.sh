@@ -48,10 +48,14 @@ if [ -n "$COMPANION" ]; then
   chmod +x "$COMPANION"
   "$COMPANION" --udid "$UDID" >/tmp/idb.log 2>&1 &
 fi
-python3 -m pip install --user fb-idb || true
-export PATH="$PATH:$HOME/Library/Python/3.9/bin:$HOME/Library/Python/3.11/bin:$HOME/Library/Python/3.12/bin:$HOME/Library/Python/3.13/bin:/opt/homebrew/bin:/usr/local/bin"
+python3 -m pip install --user --break-system-packages fb-idb || true
+PYBIN=$(python3 -c 'import glob,os; print(":".join(glob.glob(os.path.expanduser("~/Library/Python/*/bin"))))')
+export PATH="$PYBIN:$PATH:/opt/homebrew/bin:/usr/local/bin"
+command -v idb || echo "idb client missing"
 
-python3 scripts/engine.py --udid "$UDID" --port 8787 >/tmp/engine.log 2>&1 &
+python3 -u scripts/engine.py --udid "$UDID" --port 8787 >/tmp/engine.log 2>&1 &
+ENGINE=$!
+tail -n +1 -f /tmp/engine.log &
 ENGINE=$!
 
 case "$ARCH" in
