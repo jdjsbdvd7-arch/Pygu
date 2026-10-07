@@ -20,7 +20,34 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
             self?.shell.drain()
         }
+        Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            self?.publishFrame()
+        }
         return true
+    }
+
+    func publishFrame() {
+        guard let window else { return }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+        }
+        guard let data = image.jpegData(compressionQuality: 0.42) else { return }
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = folder.appendingPathComponent("frame.jpg")
+        let temporary = folder.appendingPathComponent("frame.tmp")
+        do {
+            try data.write(to: temporary, options: .atomic)
+            if FileManager.default.fileExists(atPath: url.path) {
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
+            } else {
+                try FileManager.default.moveItem(at: temporary, to: url)
+            }
+        } catch {
+            return
+        }
     }
 }
 
@@ -51,6 +78,12 @@ final class ShellController {
                 let x = (obj["x"] as? NSNumber)?.doubleValue ?? 0
                 let y = (obj["y"] as? NSNumber)?.doubleValue ?? 0
                 press(x: x, y: y)
+            } else if cmd == "gesture" {
+                gesture(obj["points"] as? [[String: Any]] ?? [])
+            } else if cmd == "home" {
+                nav?.popToRootViewController(animated: true)
+            } else if cmd == "type" {
+                insert(obj["text"] as? String ?? "")
             }
         }
     }
@@ -91,6 +124,30 @@ final class ShellController {
             }
             node = current.superview
         }
+    }
+
+    func gesture(_ points: [[String: Any]]) {
+        guard let first = points.first, let last = points.last else { return }
+        let x0 = (first["x"] as? NSNumber)?.doubleValue ?? 0
+        let y0 = (first["y"] as? NSNumber)?.doubleValue ?? 0
+        let x1 = (last["x"] as? NSNumber)?.doubleValue ?? 0
+        let y1 = (last["y"] as? NSNumber)?.doubleValue ?? 0
+        let dx = x1 - x0
+        let dy = y1 - y0
+        if x0 < 0.14, dx > 0.16, abs(dy) < 0.25 {
+            nav?.popViewController(animated: true)
+            return
+        }
+        if abs(dx) < 0.03, abs(dy) < 0.03 {
+            press(x: x1, y: y1)
+        } else {
+            press(x: x1, y: y1)
+        }
+    }
+
+    func insert(_ text: String) {
+        guard let notes = nav?.topViewController as? NotesController else { return }
+        notes.insert(text)
     }
 }
 
@@ -340,6 +397,15 @@ final class NotesController: UIViewController, UITextViewDelegate {
     }
 
     func textViewDidChange(_ textView: UITextView) {
+        UserDefaults.standard.set(textView.text, forKey: "pygu.notes")
+    }
+
+    func insert(_ text: String) {
+        if text == "\u{8}" {
+            textView.deleteBackward()
+        } else {
+            textView.insertText(text)
+        }
         UserDefaults.standard.set(textView.text, forKey: "pygu.notes")
     }
 }

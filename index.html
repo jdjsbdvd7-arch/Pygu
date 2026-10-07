@@ -28,8 +28,10 @@
   .screen { position: relative; aspect-ratio: 390 / 844; border-radius: 31px; overflow: hidden; background: #000; }
   .screen img, .idle { width: 100%; height: 100%; }
   .screen img { object-fit: fill; display: block; }
-  .idle { display: grid; place-items: center; color: #8e8e93; }
+  .idle { position: absolute; inset: 0; display: grid; place-items: center; color: #8e8e93; }
   .press { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: rgb(255 255 255 / 62%); pointer-events: none; }
+  .rig { display: flex; justify-content: center; padding: 0 0 0.85rem; }
+  .rig button { border: 0; background: #2c2c2e; color: #fff; min-height: 32px; padding: 0 1.1rem; border-radius: 16px; font-size: 0.92rem; }
   .add { gap: 0.5rem; }
   .add input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 0.75rem 0; outline: none; font-size: 1.05rem; }
   .add button { border: 0; background: transparent; color: #0a84ff; font-size: 1.05rem; padding: 0; }
@@ -49,8 +51,9 @@
     <h2>Screen</h2>
     <div class="group">
       <div class="screen-row">
-        <div class="device"><div class="screen" id="screen"><div class="idle">No session</div></div></div>
+        <div class="device"><div class="screen" id="screen"><img id="feed" alt="iPhone" style="display:none"><div class="idle" id="idle">No session</div></div></div>
       </div>
+      <div class="rig"><button type="button" id="home">Home</button></div>
     </div>
   </section>
   <section>
@@ -74,10 +77,13 @@ const SESSION = "https://raw.githubusercontent.com/jdjsbdvd7-arch/Pygu/main/run/
 const BUILTIN = ["Settings", "Notes", "Clock"];
 const appsEl = document.querySelector("#apps");
 const screen = document.querySelector("#screen");
+const feed = document.querySelector("#feed");
+const idle = document.querySelector("#idle");
 const statusEl = document.querySelector("#status");
 let apps = BUILTIN.slice();
 let live = "";
-let timer = 0;
+let stroke = [];
+let playing = false;
 
 function saved() {
   try { return JSON.parse(localStorage.getItem("pygu-apps") || "[]"); }
@@ -92,44 +98,97 @@ function renderApps() {
 renderApps();
 
 function showIdle(text) {
-  if (timer) { clearInterval(timer); timer = 0; }
   live = "";
-  screen.innerHTML = '<div class="idle"></div>';
-  screen.querySelector(".idle").textContent = text;
+  playing = false;
+  feed.style.display = "none";
+  idle.style.display = "grid";
+  idle.textContent = text;
 }
 
-function showLive(url) {
-  if (live === url && screen.querySelector("img")) return;
+function play(url) {
+  if (live === url) return;
   live = url;
-  const img = document.createElement("img");
-  img.alt = "iPhone";
-  screen.innerHTML = "";
-  screen.appendChild(img);
-  const tick = () => { img.src = url + "/frame?t=" + Date.now(); };
-  tick();
-  if (timer) clearInterval(timer);
-  timer = setInterval(tick, 500);
-  img.addEventListener("pointerdown", async (event) => {
-    const rect = img.getBoundingClientRect();
-    const dot = document.createElement("span");
-    dot.className = "press";
-    dot.style.left = (event.clientX - rect.left) + "px";
-    dot.style.top = (event.clientY - rect.top) + "px";
-    screen.appendChild(dot);
-    setTimeout(() => dot.remove(), 420);
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = (event.clientY - rect.top) / rect.height;
-    try {
-      await fetch(url + "/tap", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ x, y })
-      });
-    } catch (err) {
-      statusEl.textContent = "Tap missed";
+  idle.textContent = "Connecting";
+  const ctrl = new AbortController();
+  fetch(url + "/stream", { signal: ctrl.signal }).then(async (res) => {
+    const reader = res.body.getReader();
+    let buf = new Uint8Array(0);
+    let current = "";
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done || !chunk.value) break;
+      const next = new Uint8Array(buf.length + chunk.value.length);
+      next.set(buf);
+      next.set(chunk.value, buf.length);
+      buf = next;
+      while (buf.length >= 4) {
+        const size = new DataView(buf.buffer, buf.byteOffset, 4).getUint32(0);
+        if (size < 100 || size > 2000000 || buf.length < size + 4) break;
+        const jpeg = buf.slice(4, size + 4);
+        buf = buf.slice(size + 4);
+        const blob = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
+        if (current) URL.revokeObjectURL(current);
+        current = blob;
+        feed.src = blob;
+        feed.style.display = "block";
+        idle.style.display = "none";
+        playing = true;
+      }
     }
-  });
+  }).catch(() => {});
 }
+
+function norm(event) {
+  const rect = feed.getBoundingClientRect();
+  return { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height };
+}
+feed.addEventListener("pointerdown", (event) => {
+  feed.setPointerCapture(event.pointerId);
+  stroke = [norm(event)];
+  const rect = feed.getBoundingClientRect();
+  const dot = document.createElement("span");
+  dot.className = "press";
+  dot.style.left = (event.clientX - rect.left) + "px";
+  dot.style.top = (event.clientY - rect.top) + "px";
+  screen.appendChild(dot);
+  setTimeout(() => dot.remove(), 280);
+});
+feed.addEventListener("pointermove", (event) => {
+  if (!stroke.length) return;
+  const next = norm(event);
+  const last = stroke[stroke.length - 1];
+  if (Math.hypot(next.x - last.x, next.y - last.y) > 0.012) stroke.push(next);
+});
+feed.addEventListener("pointerup", async () => {
+  const points = stroke;
+  stroke = [];
+  if (!live || !points.length) return;
+  try {
+    await fetch(live + "/gesture", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ points })
+    });
+  } catch (err) {
+    statusEl.textContent = "Tap missed";
+  }
+});
+document.querySelector("#home").addEventListener("click", () => {
+  if (!live) return;
+  fetch(live + "/home", { method: "POST" });
+});
+window.addEventListener("keydown", (event) => {
+  if (event.target.closest("input")) return;
+  if (!live) return;
+  const text = event.key === "Backspace" ? "\b" : event.key.length === 1 ? event.key : "";
+  if (!text) return;
+  event.preventDefault();
+  fetch(live + "/type", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text })
+  });
+});
 
 async function poll() {
   try {
@@ -138,7 +197,7 @@ async function poll() {
     const body = await res.json();
     if (body.status === "live" && body.url) {
       statusEl.textContent = "Live";
-      showLive(body.url.replace(/\/$/, ""));
+      play(body.url.replace(/\/$/, ""));
       return;
     }
     statusEl.textContent = "Off";

@@ -2,44 +2,37 @@
 import argparse
 import json
 import os
-import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-state = {"image": b"", "kind": "image/png", "error": ""}
+state = {"image": b"", "kind": "image/jpeg", "error": ""}
 lock = threading.Lock()
 inbox = ""
+frame_path = ""
 
 
-def capture_loop(udid):
-    jpeg = "/tmp/pygu-frame.jpg"
-    png = "/tmp/pygu-frame.png"
+def read_frame():
+    try:
+        data = open(frame_path, "rb").read()
+    except OSError:
+        return b""
+    if len(data) < 4 or not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9"):
+        return b""
+    return data
+
+
+def capture_loop():
+    last = b""
     while True:
-        try:
-            jpeg_try = subprocess.run(
-                ["xcrun", "simctl", "io", udid, "screenshot", "--type=jpeg", "--mask=ignored", jpeg],
-                capture_output=True,
-            )
-            if jpeg_try.returncode == 0 and os.path.exists(jpeg):
-                data = open(jpeg, "rb").read()
-                kind = "image/jpeg"
-            else:
-                subprocess.run(
-                    ["xcrun", "simctl", "io", udid, "screenshot", "--mask=ignored", png],
-                    check=True,
-                    capture_output=True,
-                )
-                data = open(png, "rb").read()
-                kind = "image/png"
+        data = read_frame()
+        if data and data != last:
+            last = data
             with lock:
                 state["image"] = data
-                state["kind"] = kind
+                state["kind"] = "image/jpeg"
                 state["error"] = ""
-        except Exception as exc:
-            with lock:
-                state["error"] = str(exc)
-        time.sleep(0.2)
+        time.sleep(0.02)
 
 
 def enqueue(payload):
@@ -76,14 +69,32 @@ def make_handler():
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
+            if path == "/stream":
+                self.send_response(200)
+                self.send_header("content-type", "application/octet-stream")
+                self.send_header("access-control-allow-origin", "*")
+                self.send_header("cache-control", "no-store")
+                self.send_header("x-accel-buffering", "no")
+                self.end_headers()
+                previous = b""
+                try:
+                    while True:
+                        with lock:
+                            image = state["image"]
+                        if image and image != previous:
+                            previous = image
+                            self.wfile.write(len(image).to_bytes(4, "big") + image)
+                            self.wfile.flush()
+                        time.sleep(0.03)
+                except Exception:
+                    return
             if path == "/frame":
                 with lock:
                     image = state["image"]
-                    kind = state["kind"]
                 if not image:
                     self.end(503, b"", "image/jpeg")
                     return
-                self.end(200, image, kind)
+                self.end(200, image, "image/jpeg")
                 return
             if path == "/health":
                 with lock:
@@ -105,6 +116,28 @@ def make_handler():
                         self.end(400, b"bad point", "text/plain")
                         return
                     ok, detail = enqueue({"cmd": "tap", "x": x, "y": y})
+                elif path == "/gesture":
+                    points = body.get("points")
+                    if not isinstance(points, list) or not points:
+                        self.end(400, b"bad gesture", "text/plain")
+                        return
+                    clean = []
+                    for point in points[:40]:
+                        x = float(point.get("x", -1))
+                        y = float(point.get("y", -1))
+                        if not (0 <= x <= 1 and 0 <= y <= 1):
+                            self.end(400, b"bad point", "text/plain")
+                            return
+                        clean.append({"x": x, "y": y})
+                    ok, detail = enqueue({"cmd": "gesture", "points": clean})
+                elif path == "/home":
+                    ok, detail = enqueue({"cmd": "home"})
+                elif path == "/type":
+                    text = str(body.get("text", ""))[:8]
+                    if not text:
+                        self.end(400, b"bad text", "text/plain")
+                        return
+                    ok, detail = enqueue({"cmd": "type", "text": text})
                 elif path == "/app":
                     name = str(body.get("name", "")).strip()[:24]
                     if not name:
@@ -123,14 +156,16 @@ def make_handler():
 
 
 def main():
-    global inbox
+    global inbox, frame_path
     parser = argparse.ArgumentParser()
     parser.add_argument("--udid", required=True)
     parser.add_argument("--inbox", required=True)
+    parser.add_argument("--frames", required=True)
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
     inbox = args.inbox
-    threading.Thread(target=capture_loop, args=(args.udid,), daemon=True).start()
+    frame_path = args.frames
+    threading.Thread(target=capture_loop, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler())
     print(f"engine listening on {args.port}", flush=True)
     server.serve_forever()
