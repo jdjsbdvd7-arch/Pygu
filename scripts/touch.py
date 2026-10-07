@@ -10,16 +10,27 @@ log = logging.getLogger("touch")
 
 
 async def open_client(udid):
+    import glob
+    import os
+
+    from idb.grpc.management import ClientManager
+
+    companion = None
+    for path in glob.glob("/tmp/idb/**/idb_companion", recursive=True):
+        if os.path.isfile(path):
+            companion = path
+            break
+    manager = ClientManager(logger=log, companion_path=companion)
     last = "touch client missing"
     for _ in range(40):
         try:
-            from idb.client.grpc import GrpcClientManager
-
-            manager = GrpcClientManager(logger=log)
             ctx = manager.from_udid(udid=udid)
-            return await ctx.__aenter__()
+            client = await ctx.__aenter__()
+            print("touch connected", flush=True)
+            return client
         except Exception as exc:
             last = str(exc)
+            print("touch wait", last, flush=True)
         await asyncio.sleep(0.5)
     raise RuntimeError(last)
 
