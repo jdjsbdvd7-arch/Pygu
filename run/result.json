@@ -1,5 +1,6 @@
 {
   "status": "launched",
   "bundle": "app.pygu.runner",
+  "title": "Pygu",
   "udid": "DC4CD8B3-4457-4153-9087-A0D7A2F9BFD9"
 }
