@@ -95,14 +95,16 @@ function Screen() {
           const first = points[0];
           const last = points[points.length - 1];
           if (first.y > 0.84 && last.y < first.y - 0.12) {
-            void fetch("/api/go?op=home", { method: "POST" });
+            const home = new URLSearchParams({ op: "home", t: String(Date.now()) });
+            void fetch(`/api/go?${home.toString()}`, { method: "GET", cache: "no-store" });
             return;
           }
-          void fetch("/api/go?op=gesture", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ points }),
+          const query = new URLSearchParams({
+            op: "gesture",
+            t: String(Date.now()),
+            p: points.map((item) => `${item.x.toFixed(4)},${item.y.toFixed(4)}`).join(";"),
           });
+          void fetch(`/api/go?${query.toString()}`, { method: "GET", cache: "no-store" });
         }}
       />
       {!seen && <div className="wait">Connecting</div>}

@@ -6,6 +6,7 @@
 <title>Pygu</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
+  html, body, img, #touch { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   img { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   #touch { position: fixed; inset: 0; z-index: 2; touch-action: none; }
   .wait { position: fixed; inset: 0; z-index: 3; display: grid; place-items: center; color: #8e8e93; background: #000; font: 16px -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -53,41 +54,84 @@ async function pull() {
   setTimeout(pull, 90);
 }
 
-function point(event) {
-  return { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight };
+function place(event) {
+  const touch = (event.touches && event.touches[0]) || (event.changedTouches && event.changedTouches[0]);
+  return touch || event;
 }
 
-touch.addEventListener("pointerdown", (event) => {
-  touch.setPointerCapture(event.pointerId);
+function point(event) {
+  const here = place(event);
+  const rect = shown.getBoundingClientRect();
+  const nw = shown.naturalWidth || rect.width;
+  const nh = shown.naturalHeight || rect.height;
+  const scale = Math.max(rect.width / nw, rect.height / nh);
+  const width = nw * scale;
+  const height = nh * scale;
+  const left = rect.left + (rect.width - width) / 2;
+  const top = rect.top + (rect.height - height) / 2;
+  return {
+    x: Math.min(1, Math.max(0, (here.clientX - left) / width)),
+    y: Math.min(1, Math.max(0, (here.clientY - top) / height))
+  };
+}
+
+function send(op, points) {
+  const query = new URLSearchParams({ op: op, t: String(Date.now()) });
+  if (points && points.length) {
+    query.set("p", points.map((item) => item.x.toFixed(4) + "," + item.y.toFixed(4)).join(";"));
+  }
+  fetch("/api/go?" + query.toString(), { method: "GET", cache: "no-store" });
+}
+
+function down(event) {
+  if (event.cancelable) event.preventDefault();
   stroke = [point(event)];
+  const here = place(event);
   const dot = document.createElement("span");
   dot.className = "press";
-  dot.style.left = event.clientX + "px";
-  dot.style.top = event.clientY + "px";
+  dot.style.left = here.clientX + "px";
+  dot.style.top = here.clientY + "px";
   document.body.appendChild(dot);
   setTimeout(() => dot.remove(), 140);
-});
-touch.addEventListener("pointermove", (event) => {
+}
+
+function move(event) {
   if (!stroke.length) return;
+  if (event.cancelable) event.preventDefault();
   const here = point(event);
   const last = stroke[stroke.length - 1];
   if (Math.hypot(here.x - last.x, here.y - last.y) > 0.008) stroke.push(here);
-});
-touch.addEventListener("pointerup", () => {
+}
+
+function up(event) {
+  if (event && event.cancelable) event.preventDefault();
   const points = stroke;
   stroke = [];
   if (!points.length) return;
   const first = points[0];
   const last = points[points.length - 1];
   if (first.y > 0.84 && last.y < first.y - 0.12) {
-    fetch("/api/go?op=home", { method: "POST" });
+    send("home");
     return;
   }
-  fetch("/api/go?op=gesture", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ points })
-  });
+  send("gesture", points);
+}
+
+touch.addEventListener("contextmenu", (event) => event.preventDefault());
+touch.addEventListener("touchstart", down, { passive: false });
+touch.addEventListener("touchmove", move, { passive: false });
+touch.addEventListener("touchend", up, { passive: false });
+touch.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "touch") return;
+  down(event);
+});
+touch.addEventListener("pointermove", (event) => {
+  if (event.pointerType === "touch") return;
+  move(event);
+});
+touch.addEventListener("pointerup", (event) => {
+  if (event.pointerType === "touch") return;
+  up(event);
 });
 
 pull();

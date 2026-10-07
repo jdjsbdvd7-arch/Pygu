@@ -15,11 +15,38 @@ async function tunnel() {
 
 export default async function handler(req, res) {
   const op = new URL(req.url, "http://pygu.local").searchParams.get("op") || "frame";
+  const query = new URL(req.url, "http://pygu.local").searchParams;
   const base = await tunnel();
   if (!base) {
     res.statusCode = 404;
     res.setHeader("cache-control", "no-store");
     res.end("offline");
+    return;
+  }
+  if (op !== "frame") {
+    let payload = {};
+    if (op === "gesture") {
+      const points = String(query.get("p") || "")
+        .split(";")
+        .filter(Boolean)
+        .map((pair) => {
+          const [x, y] = pair.split(",");
+          return { x: Number(x), y: Number(y) };
+        })
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+      payload = { points };
+    } else if (op === "type") {
+      payload = { text: query.get("text") || "" };
+    }
+    const sent = await fetch(base + "/" + op, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    res.statusCode = sent.status;
+    res.setHeader("content-type", "text/plain");
+    res.setHeader("cache-control", "no-store");
+    res.end(await sent.text());
     return;
   }
   if (req.method === "GET") {
