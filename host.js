@@ -740,7 +740,7 @@
     function remember(name) {
       if (!name) return;
       if (trace[trace.length - 1] !== name) trace.push(name);
-      if (trace.length > 24) trace.shift();
+      if (trace.length > 80) trace.shift();
     }
     function cstr(value) {
       var addr = bump;
@@ -1727,10 +1727,11 @@
       state = "stop";
       detail = "UIApplicationMain is provided. The guest stopped after the call. " + stop;
     } else if (!stop) {
-      state = "run";
-      detail = "The entry returned before it drew a screen.";
+      state = "stop";
+      var found = Object.keys(classes);
+      detail = "The entry returned before it drew a screen. Steps: " + guard + ". Classes: " + (found.length ? found.join(", ") : "none") + ". UI entry: " + ((image.ui && (image.ui.launch || image.ui.body)) || "none") + ".";
     } else detail = stop;
-    if (trace.length) detail += " Calls: " + trace.slice(-8).join(", ") + ".";
+    if (trace.length) detail += " Calls: " + trace.slice(-40).join(", ") + ".";
     return { state: state, detail: detail, views: views, logs: logs, steps: steps, proc: proc };
   }
 
