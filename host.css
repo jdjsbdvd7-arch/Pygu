@@ -15,7 +15,7 @@ button { cursor: pointer; }
   font: 16px/1.45 "IBM Plex Sans", sans-serif;
 }
 .host .shell { height: 100%; display: flex; flex-direction: column; }
-.host header { display: flex; align-items: center; gap: 12px; padding: max(18px, env(safe-area-inset-top)) 20px 8px; }
+.host header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: max(18px, env(safe-area-inset-top)) 20px 8px; }
 .host .brand { flex: 1; min-width: 0; }
 .host .word { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.04em; }
 .host .clock, .host .status { margin: 0; }
@@ -79,24 +79,13 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .host * { transition: none; }
 }
-.host.stage-full .shell { visibility: hidden; }
-.host .phone.dock { width: min(100%, 390px); margin: 4px auto 0; }
-.host .phone.float { position: fixed; z-index: 50; width: min(320px, calc(100vw - 20px)); filter: drop-shadow(0 22px 40px rgba(0, 0, 0, 0.55)); }
-.host .phone.full { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: #070708; }
-.host .grip { display: flex; align-items: center; gap: 6px; padding: 8px 0; }
-.host .phone.full .grip { display: none; }
-.host .grip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; touch-action: none; cursor: grab; }
+.host .phone.float { position: fixed; z-index: 50; width: min(360px, calc(100vw - 20px)); background: var(--ink); }
+.host .phone.full { margin-top: 12px; }
+.host .grip { display: flex; align-items: center; height: 36px; padding: 0 4px; touch-action: none; cursor: grab; }
+.host .grip-name { color: var(--muted); font-size: 13px; }
 .host .mode { height: 32px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 500 13px/1 "IBM Plex Sans", sans-serif; }
 .host .mode.on { background: var(--surface); color: var(--paper); }
-.host .glass { position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 36px; background: #070708; overflow: hidden; touch-action: none; }
-.host .phone.dock .glass { aspect-ratio: 9 / 16; }
-.host .phone.float .glass { height: min(68vh, 560px); }
-.host .phone.full .glass { flex: 1; height: 100%; border: 0; border-radius: 0; }
-.host .phone .chrome { align-items: center; }
-.host .phone.full .chrome { padding-top: max(14px, env(safe-area-inset-top)); }
-.host .island { width: 72px; height: 22px; border-radius: 999px; background: #000; }
-.host .sig { width: 18px; height: 10px; border: 1.5px solid var(--paper); border-radius: 3px; }
-.host .phone .body { flex: 1; min-height: 0; padding-bottom: 48px; }
-.host .home { position: absolute; left: 50%; bottom: max(8px, env(safe-area-inset-bottom)); width: 136px; height: 28px; transform: translateX(-50%); border: 0; border-radius: 999px; background: transparent; }
-.host .home:before { content: ""; display: block; width: 128px; height: 5px; margin: 11px auto 0; border-radius: 999px; background: var(--paper); }
-.host .touch { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border: 1px solid var(--paper); border-radius: 50%; pointer-events: none; }
+.host .glass { background: #070708; overflow: hidden; }
+.host .phone.float .glass { height: min(70vh, 640px); }
+.host .phone.full .glass { min-height: 70vh; }
+.host .phone .body { min-height: 0; }

@@ -1456,9 +1456,9 @@
       detail = "UIApplicationMain is provided. The guest stopped after the call. " + stop;
     } else if (!stop) {
       state = "run";
-      detail = "The entry returned.";
+      detail = "The entry returned before it drew a screen.";
     } else detail = stop;
-    if (state !== "run" && trace.length) detail += " Calls: " + trace.slice(-6).join(", ") + ".";
+    if (trace.length) detail += " Calls: " + trace.slice(-8).join(", ") + ".";
     return { state: state, detail: detail, views: views, logs: logs, steps: steps, proc: proc };
   }
 
@@ -1587,7 +1587,7 @@
   function start(mount) {
     mount.className = "host";
     mount.replaceChildren();
-    var model = { tab: "now", guest: null, error: "", busy: false, shelf: [], booted: 0, mode: "dock", float: { x: 18, y: 92 } };
+    var model = { tab: "now", guest: null, error: "", busy: false, shelf: [], booted: 0, mode: "float", float: { x: 18, y: 92 } };
     var icons = {
       now: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
       shelf: "M5 7h14M5 12h14M5 17h8",
@@ -1736,26 +1736,14 @@
 
     function buildPhone(mode) {
       var guest = model.guest;
-      var entry = entryOf(guest);
       var phone = el("section", "phone " + mode);
       if (mode === "float") {
         phone.style.left = model.float.x + "px";
         phone.style.top = model.float.y + "px";
-      }
-      var grip = el("div", "grip");
-      grip.appendChild(el("span", "grip-name", guest.name));
-      ["dock", "float", "full"].forEach(function (name) {
-        var button = el("button", "mode" + (mode === name ? " on" : ""), name === "dock" ? "Dock" : name === "float" ? "Float" : "Full");
-        button.type = "button";
-        button.addEventListener("click", function (event) {
-          event.stopPropagation();
-          setMode(name);
-        });
-        grip.appendChild(button);
-      });
-      if (mode === "float") {
+        var grip = el("div", "grip");
+        var handle = el("span", "grip-name", guest.name);
+        grip.appendChild(handle);
         grip.addEventListener("pointerdown", function (event) {
-          if (event.target !== grip && event.target.className !== "grip-name") return;
           var startX = event.clientX;
           var startY = event.clientY;
           var originX = model.float.x;
@@ -1774,52 +1762,20 @@
           grip.addEventListener("pointermove", move);
           grip.addEventListener("pointerup", up);
         });
+        phone.appendChild(grip);
       }
-      phone.appendChild(grip);
       var glass = el("div", "glass");
-      var bar = el("div", "chrome");
-      bar.appendChild(el("span", "clock", clock()));
-      bar.appendChild(el("span", "island", ""));
-      bar.appendChild(el("span", "sig", ""));
-      glass.appendChild(bar);
       var views = guest.screen && guest.screen.views ? guest.screen.views : [];
       var body = el("div", views.length ? "body texts" : "body");
-      if (views.length) {
-        views.forEach(function (view) { body.appendChild(el("p", "label", view.text)); });
-      } else if (entry && entry.state === "run") {
-        if (guest.icon) {
-          var launch = document.createElement("img");
-          launch.alt = "";
-          launch.className = "launch";
-          launch.src = guest.icon;
-          body.appendChild(launch);
-        }
-        body.appendChild(el("p", "launch-name", guest.name));
-      } else {
-        body.appendChild(el("p", "muted", entry ? entry.detail : "Not started."));
-      }
+      views.forEach(function (view) { body.appendChild(el("p", "label", view.text)); });
       glass.appendChild(body);
-      glass.addEventListener("pointerdown", function (event) {
-        var rect = glass.getBoundingClientRect();
-        var ring = el("span", "touch");
-        ring.style.left = (event.clientX - rect.left) + "px";
-        ring.style.top = (event.clientY - rect.top) + "px";
-        glass.appendChild(ring);
-        window.setTimeout(function () { if (ring.parentNode) ring.remove(); }, 480);
-      });
-      var home = el("button", "home");
-      home.type = "button";
-      home.setAttribute("aria-label", "Leave full screen");
-      home.addEventListener("click", function () { if (model.mode === "full") setMode("dock"); });
-      glass.appendChild(home);
       phone.appendChild(glass);
       return phone;
     }
 
     function syncPhone() {
-      mount.classList.toggle("stage-full", !!(model.guest && model.mode === "full"));
       var overlay = mount.querySelector(":scope > .phone");
-      if (!model.guest || model.mode === "dock") {
+      if (!model.guest || model.mode !== "float") {
         if (overlay) overlay.remove();
         return;
       }
@@ -1863,8 +1819,9 @@
       titles.appendChild(el("p", "muted", [guest.bundleId, guest.version].filter(Boolean).join("  ·  ")));
       who.appendChild(titles);
       main.appendChild(who);
-      if (model.mode === "dock") main.appendChild(buildPhone("dock"));
-      else main.appendChild(el("p", "lead", model.mode === "full" ? "The guest fills this device. The bar at the bottom returns here." : "The guest is floating. Drag its name. Full takes the whole device."));
+      var entryLine = el("p", "detail", entry ? entry.detail : "Not started.");
+      main.appendChild(entryLine);
+      if (model.mode === "full") main.appendChild(buildPhone("full"));
       if (guest.proc) {
         var alive = entry && entry.state === "run";
         var card = el("div", "proc");
@@ -1957,6 +1914,14 @@
       open.disabled = model.busy;
       open.addEventListener("click", function () { input.click(); });
       if (!(model.tab === "now" && !model.guest)) header.appendChild(open);
+      if (model.guest) {
+        ["float", "full"].forEach(function (name) {
+          var button = el("button", "mode" + (model.mode === name ? " on" : ""), name === "float" ? "Float" : "Full");
+          button.type = "button";
+          button.addEventListener("click", function () { setMode(name); });
+          header.appendChild(button);
+        });
+      }
       main.replaceChildren();
       if (model.tab === "shelf") paintShelf();
       else if (model.tab === "bench") paintBench();
