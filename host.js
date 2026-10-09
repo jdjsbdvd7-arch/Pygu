@@ -517,11 +517,28 @@
       }
       walkTrie(trie.off, "", 0);
     }
-    var ui = { body: 0, launch: 0 };
+    var ui = { body: 0, launch: 0, bodyName: "", launchName: "", outside: 0 };
     var di;
+    var bodyScore = 0;
+    var launchScore = 0;
     for (di = 0; di < defined.length; di += 1) {
-      if (!ui.body && defined[di].name.indexOf("4body") !== -1) ui.body = defined[di].addr;
-      if (!ui.launch && defined[di].name.indexOf("didFinishLaunching") !== -1) ui.launch = defined[di].addr;
+      var sym = defined[di];
+      var bodyRank = sym.name.indexOf("4bodyQrvg") !== -1 ? 2 : (sym.name.indexOf("4body") !== -1 ? 1 : 0);
+      var launchRank = sym.name.indexOf("didFinishLaunching") !== -1 ? 2 : 0;
+      if (!mem.seg(sym.addr)) {
+        if ((bodyRank || launchRank) && !ui.outside) ui.outside = sym.addr;
+        continue;
+      }
+      if (bodyRank > bodyScore) {
+        bodyScore = bodyRank;
+        ui.body = sym.addr;
+        ui.bodyName = sym.name;
+      }
+      if (launchRank > launchScore) {
+        launchScore = launchRank;
+        ui.launch = sym.addr;
+        ui.launchName = sym.name;
+      }
     }
     return { mem: mem, entry: base + entry, base: base, stubs: stubs, bytes: bytes, ui: ui };
   }
@@ -990,6 +1007,15 @@
         var sel = mem.str(x[1]) || textOf(x[1]);
         remember(sel);
         var obj = objects[x[0]];
+        var owner = obj && classes[obj.className];
+        if (!(owner && owner.imps && owner.imps[sel])) {
+          var ck;
+          var names = Object.keys(classes);
+          for (ck = 0; ck < names.length; ck += 1) {
+            if (classes[names[ck]].imps[sel]) { owner = classes[names[ck]]; break; }
+          }
+        }
+        if (owner && owner.imps[sel]) return callGuest(owner.imps[sel], x[0], x[2], x[3], function (result) { return { x0: result || x[0] }; });
         if (sel === "setText:" || sel === "setTitle:" || sel === "setString:") {
           var value = textOf(x[2]);
           if (obj) obj.text = value;
@@ -1175,7 +1201,9 @@
       if (name === "swift_getObjCClassFromMetadata" || name === "swift_getObjCClassMetadata" || name === "swift_getInitializedObjCClass") return x[0];
       if (name.indexOf("swift_getTypeByMangledName") === 0) {
         var inState = name.indexOf("InMetadataState") !== -1;
-        return typeFromMangled(inState ? x[1] : x[0], inState ? x[2] : x[1], inState ? x[3] : x[2]);
+        var typed = typeFromMangled(inState ? x[1] : x[0], inState ? x[2] : x[1], inState ? x[3] : x[2]);
+        if (!redirect) x[1] = 0;
+        return typed;
       }
       if (name === "swift_getGenericMetadata") {
         var genericKey = String(x[2] || 0);
@@ -1200,6 +1228,17 @@
       if (name.indexOf("os_") === 0 || name.indexOf("pthread_") === 0 || name.indexOf("dispatch_") === 0 || name.indexOf("voucher_") === 0) return 0;
       if (name.indexOf("arc4random") === 0) return (Math.random() * 4294967296) >>> 0;
       if (name === "mach_absolute_time" || name === "clock_gettime_nsec_np") return Date.now() * 1000000;
+      if (name === "CFRunLoopRun" || name === "CFRunLoopRunInMode" || name === "dispatch_main") {
+        hitMain = true;
+        var parked = uiEntry();
+        if (parked && mem.seg(parked)) {
+          redirect = parked;
+          x[30] = exitSlot;
+          return fresh("application", "UIApplication");
+        }
+        redirect = 1;
+        return 0;
+      }
       if (/^(CF|CG|CT|CA|UI|NS|Sec|MTL|AV|WK|swift_)/.test(name)) {
         var made = textOf(x[0]) || textOf(x[1]) || textOf(x[2]);
         if (made && (name.indexOf("String") !== -1 || name.indexOf("Text") !== -1)) {
@@ -1232,7 +1271,7 @@
       if (link) x[30] = pc + 4;
       if (image.stubs[addr]) {
         x[0] = call(addr);
-        pc = redirect || (link ? pc + 4 : 1);
+        pc = redirect || (link ? pc + 4 : (x[30] || 1));
       } else pc = addr;
       redirect = 0;
     }
@@ -1510,7 +1549,17 @@
     var guard = 0;
     while (!stop && guard < 1500000) {
       guard += 1;
-      if (pc === 1) break;
+      if (pc === 1) {
+        var resume = uiEntry();
+        if (resume && mem.seg(resume)) {
+          hitMain = true;
+          x[0] = fresh("application", "UIApplication");
+          x[30] = exitSlot;
+          pc = resume;
+          continue;
+        }
+        break;
+      }
       if (image.stubs[pc]) {
         x[0] = call(pc);
         pc = redirect || x[30] || 1;
@@ -1552,7 +1601,7 @@
         continue;
       }
       if (is(0xfc000000, 0x14000000)) {
-        pc = pc + sex(word & 0x3ffffff, 26) * 4;
+        takeBranch(pc + sex(word & 0x3ffffff, 26) * 4, false);
         continue;
       }
       if (is(0xff000010, 0x54000000)) {
@@ -1729,7 +1778,9 @@
     } else if (!stop) {
       state = "stop";
       var found = Object.keys(classes);
-      detail = "The entry returned before it drew a screen. Steps: " + guard + ". Classes: " + (found.length ? found.join(", ") : "none") + ". UI entry: " + ((image.ui && (image.ui.launch || image.ui.body)) || "none") + ".";
+      var uiLabel = (image.ui && (image.ui.launchName || image.ui.bodyName)) || ((image.ui && (image.ui.launch || image.ui.body)) || "none");
+      if (image.ui && image.ui.outside && uiLabel === "none") uiLabel = "outside " + image.ui.outside;
+      detail = "The entry returned before it drew a screen. Steps: " + guard + ". Classes: " + (found.length ? found.join(", ") : "none") + ". UI entry: " + uiLabel + ".";
     } else detail = stop;
     if (trace.length) detail += " Calls: " + trace.slice(-40).join(", ") + ".";
     return { state: state, detail: detail, views: views, logs: logs, steps: steps, proc: proc };
