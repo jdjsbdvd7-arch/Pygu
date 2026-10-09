@@ -79,13 +79,20 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .host * { transition: none; }
 }
-.host .phone.float { position: fixed; z-index: 50; width: min(360px, calc(100vw - 20px)); background: var(--ink); }
-.host .phone.full { margin-top: 12px; }
-.host .grip { display: flex; align-items: center; height: 36px; padding: 0 4px; touch-action: none; cursor: grab; }
-.host .grip-name { color: var(--muted); font-size: 13px; }
-.host .mode { height: 32px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 500 13px/1 "IBM Plex Sans", sans-serif; }
-.host .mode.on { background: var(--surface); color: var(--paper); }
-.host .glass { background: #070708; overflow: hidden; }
-.host .phone.float .glass { height: min(70vh, 640px); }
-.host .phone.full .glass { min-height: 70vh; }
-.host .phone .body { min-height: 0; }
+.host nav { z-index: 40; }
+.host .stage {
+  position: fixed;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+.host .stage .glass,
+.host .stage .body { flex: 1; min-height: 0; margin: 0; padding: 0; background: #000; align-items: stretch; justify-content: flex-start; text-align: left; }
+@media (min-width: 900px) {
+  .host .stage { left: 200px; bottom: 0; }
+}

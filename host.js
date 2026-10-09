@@ -653,10 +653,13 @@
       return put({ kind: kind || "view", text: "", className: className || "", children: [] });
     }
     var retSlot = 0x210000010;
+    var exitSlot = 0x210000018;
     var retStack = [];
     var swiftBusy = {};
     var typeCache = {};
     image.stubs[retSlot] = "hostReturn";
+    image.stubs[exitSlot] = "guestExit";
+    x[30] = exitSlot;
     function sex32(at) {
       if (!mem.seg(at)) return 0;
       var u = mem.u32(at);
@@ -684,6 +687,49 @@
       if (!mem.seg(cursor + 8)) return null;
       return { cache: sex32(cursor), incomplete: sex32(cursor + 4), completion: sex32(cursor + 8) };
     }
+    function i32at(addr) {
+      var u = mem.u32(addr);
+      return u & 0x80000000 ? u - 4294967296 : u;
+    }
+    function metadataForDescriptor(desc) {
+      var init = singletonInit(desc);
+      if (init && init.cache) {
+        var ready = mem.u64(init.cache);
+        if (ready) return ready;
+      }
+      var meta = (init && init.incomplete) || allocMeta(desc, desc && (mem.u32(desc) & 31) === 16 ? 0 : 1);
+      if (init && init.completion && !swiftBusy[desc]) {
+        swiftBusy[desc] = 1;
+        return callGuest(init.completion, meta, 0, 0, function () {
+          swiftBusy[desc] = 0;
+          if (init.cache) mem.w64(init.cache, meta);
+          return { x0: meta, x1: 0 };
+        });
+      }
+      if (init && init.cache) mem.w64(init.cache, meta);
+      return meta;
+    }
+    function typeFromMangled(start, len, context) {
+      if (start && mem.seg(start) && len >= 5) {
+        var raw = mem.u8(start);
+        var at = start + 1;
+        if (raw >= 1 && raw <= 12 && mem.seg(at + 3)) {
+          var target = at + i32at(at);
+          if ((raw === 1 || raw === 2) && mem.seg(target)) {
+            var desc = raw === 2 ? mem.u64(target) : target;
+            if (desc && mem.seg(desc)) return metadataForDescriptor(desc);
+          }
+          if (raw === 9 && mem.seg(target)) {
+            return callGuest(target, context || 0, 0, 0, function (result) {
+              return { x0: result || allocMeta(context || 0, 1), x1: 0 };
+            });
+          }
+        }
+      }
+      var key = String(start || 0) + "/" + String(len || 0) + "/" + String(context || 0);
+      if (!typeCache[key]) typeCache[key] = allocMeta(context || 0, 1);
+      return typeCache[key];
+    }
     function callGuest(fn, a0, a1, a2, done) {
       retStack.push({ back: x[30], done: done });
       redirect = fn;
@@ -699,7 +745,7 @@
         stop = "Unmapped call at " + addr.toString(16);
         return 0;
       }
-      if (name !== "hostReturn") remember(name);
+      if (name !== "hostReturn" && name !== "guestExit") remember(name);
       if (name === "hostReturn") {
         var frame = retStack.pop();
         if (!frame) {
@@ -711,6 +757,10 @@
         x[2] = out.x2 || 0;
         redirect = frame.back || 1;
         return out.x0 || 0;
+      }
+      if (name === "guestExit") {
+        redirect = 1;
+        return x[0];
       }
       if (name === "UIApplicationMain") {
         hitMain = true;
@@ -884,27 +934,9 @@
         return 0;
       }
       if (name === "swift_getSingletonMetadata") {
-        var desc = x[1];
-        var init = singletonInit(desc);
-        if (init && init.cache) {
-          var ready = mem.u64(init.cache);
-          if (ready) {
-            x[1] = 0;
-            return ready;
-          }
-        }
-        var meta = (init && init.incomplete) || allocMeta(desc, desc && (mem.u32(desc) & 31) === 16 ? 0 : 1);
-        if (init && init.completion && !swiftBusy[desc]) {
-          swiftBusy[desc] = 1;
-          return callGuest(init.completion, meta, 0, 0, function () {
-            swiftBusy[desc] = 0;
-            if (init.cache) mem.w64(init.cache, meta);
-            return { x0: meta, x1: 0 };
-          });
-        }
-        if (init && init.cache) mem.w64(init.cache, meta);
+        var produced = metadataForDescriptor(x[1]);
         x[1] = 0;
-        return meta;
+        return produced;
       }
       if (name === "swift_checkMetadataState" || name === "swift_getForeignTypeMetadata") {
         var foundMeta = x[1];
@@ -934,11 +966,14 @@
       if (name.indexOf("swift_retain") === 0 || name.indexOf("swift_bridgeObjectRetain") === 0 || name.indexOf("swift_unknownObjectRetain") === 0 || name === "swift_bridgeObjectRetain_n") return x[0];
       if (name.indexOf("swift_release") === 0 || name.indexOf("swift_bridgeObjectRelease") === 0 || name.indexOf("swift_unknownObjectRelease") === 0) return 0;
       if (name === "swift_getObjCClassFromMetadata" || name === "swift_getObjCClassMetadata" || name === "swift_getInitializedObjCClass") return x[0];
-      if (name.indexOf("swift_getTypeByMangledName") === 0 || name === "swift_getGenericMetadata") {
-        var key = String(x[0] || 0) + ":" + String(name === "swift_getGenericMetadata" ? x[2] : x[1] || 0);
-        if (!typeCache[key]) typeCache[key] = allocMeta(name === "swift_getGenericMetadata" ? x[2] : 0, 1);
-        x[1] = 0;
-        return typeCache[key];
+      if (name.indexOf("swift_getTypeByMangledName") === 0) {
+        var inState = name.indexOf("InMetadataState") !== -1;
+        return typeFromMangled(inState ? x[1] : x[0], inState ? x[2] : x[1], inState ? x[3] : x[2]);
+      }
+      if (name === "swift_getGenericMetadata") {
+        var genericKey = String(x[2] || 0);
+        if (!typeCache[genericKey]) typeCache[genericKey] = allocMeta(x[2], 1);
+        return typeCache[genericKey];
       }
       if (name === "swift_initClassMetadata" || name === "swift_initClassMetadata2" || name === "swift_updateClassMetadata2" || name === "swift_initStructMetadata" || name === "swift_initEnumMetadataSinglePayload" || name === "swift_initEnumMetadataMultiPayload" || name === "swift_initStaticObject") return 0;
       stop = "The guest calls " + name + ". This host does not provide that call.";
@@ -1264,7 +1299,11 @@
       }
       if (word === 0xd65f0bff || word === 0xd65f0fff || is(0xfffffc1f, 0xd65f0000)) {
         var retTo = word === 0xd65f0bff || word === 0xd65f0fff || rn === 30 ? x[30] : reg(rn);
-        pc = retTo || 1;
+        if (!retTo) {
+          stop = "The guest returned through an empty link register.";
+          break;
+        }
+        pc = retTo;
         continue;
       }
       if (is(0xfffffc1f, 0xd63f0000) || is(0xfffffc1f, 0xd63f0800)) {
@@ -1587,7 +1626,7 @@
   function start(mount) {
     mount.className = "host";
     mount.replaceChildren();
-    var model = { tab: "now", guest: null, error: "", busy: false, shelf: [], booted: 0, mode: "float", float: { x: 18, y: 92 } };
+    var model = { tab: "now", guest: null, error: "", busy: false, shelf: [], booted: 0 };
     var icons = {
       now: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
       shelf: "M5 7h14M5 12h14M5 17h8",
@@ -1729,59 +1768,27 @@
       return button;
     }
 
-    function setMode(mode) {
-      model.mode = mode;
-      draw();
-    }
-
-    function buildPhone(mode) {
+    function buildStage() {
       var guest = model.guest;
-      var phone = el("section", "phone " + mode);
-      if (mode === "float") {
-        phone.style.left = model.float.x + "px";
-        phone.style.top = model.float.y + "px";
-        var grip = el("div", "grip");
-        var handle = el("span", "grip-name", guest.name);
-        grip.appendChild(handle);
-        grip.addEventListener("pointerdown", function (event) {
-          var startX = event.clientX;
-          var startY = event.clientY;
-          var originX = model.float.x;
-          var originY = model.float.y;
-          grip.setPointerCapture(event.pointerId);
-          function move(e) {
-            model.float.x = Math.max(8, originX + (e.clientX - startX));
-            model.float.y = Math.max(8, originY + (e.clientY - startY));
-            phone.style.left = model.float.x + "px";
-            phone.style.top = model.float.y + "px";
-          }
-          function up() {
-            grip.removeEventListener("pointermove", move);
-            grip.removeEventListener("pointerup", up);
-          }
-          grip.addEventListener("pointermove", move);
-          grip.addEventListener("pointerup", up);
-        });
-        phone.appendChild(grip);
-      }
+      var stage = el("section", "stage");
       var glass = el("div", "glass");
       var views = guest.screen && guest.screen.views ? guest.screen.views : [];
       var body = el("div", views.length ? "body texts" : "body");
       views.forEach(function (view) { body.appendChild(el("p", "label", view.text)); });
       glass.appendChild(body);
-      phone.appendChild(glass);
-      return phone;
+      stage.appendChild(glass);
+      return stage;
     }
 
-    function syncPhone() {
-      var overlay = mount.querySelector(":scope > .phone");
-      if (!model.guest || model.mode !== "float") {
+    function syncStage() {
+      var overlay = mount.querySelector(":scope > .stage");
+      if (!model.guest || model.tab !== "now") {
         if (overlay) overlay.remove();
         return;
       }
-      var phone = buildPhone(model.mode);
-      if (overlay) overlay.replaceWith(phone);
-      else mount.appendChild(phone);
+      var stage = buildStage();
+      if (overlay) overlay.replaceWith(stage);
+      else mount.appendChild(stage);
     }
 
     function stageMark(stage) {
@@ -1819,9 +1826,6 @@
       titles.appendChild(el("p", "muted", [guest.bundleId, guest.version].filter(Boolean).join("  ·  ")));
       who.appendChild(titles);
       main.appendChild(who);
-      var entryLine = el("p", "detail", entry ? entry.detail : "Not started.");
-      main.appendChild(entryLine);
-      if (model.mode === "full") main.appendChild(buildPhone("full"));
       if (guest.proc) {
         var alive = entry && entry.state === "run";
         var card = el("div", "proc");
@@ -1914,14 +1918,6 @@
       open.disabled = model.busy;
       open.addEventListener("click", function () { input.click(); });
       if (!(model.tab === "now" && !model.guest)) header.appendChild(open);
-      if (model.guest) {
-        ["float", "full"].forEach(function (name) {
-          var button = el("button", "mode" + (model.mode === name ? " on" : ""), name === "float" ? "Float" : "Full");
-          button.type = "button";
-          button.addEventListener("click", function () { setMode(name); });
-          header.appendChild(button);
-        });
-      }
       main.replaceChildren();
       if (model.tab === "shelf") paintShelf();
       else if (model.tab === "bench") paintBench();
@@ -1930,7 +1926,7 @@
       nav.appendChild(tabButton("now", "Now"));
       nav.appendChild(tabButton("shelf", "Shelf"));
       nav.appendChild(tabButton("bench", "Bench"));
-      syncPhone();
+      syncStage();
     }
 
     input.addEventListener("change", function () {
