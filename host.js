@@ -642,6 +642,46 @@
     function fresh(kind, className) {
       return put({ kind: kind || "view", text: "", className: className || "", children: [] });
     }
+    var retSlot = 0x210000010;
+    var retStack = [];
+    var swiftBusy = {};
+    var typeCache = {};
+    image.stubs[retSlot] = "hostReturn";
+    function sex32(at) {
+      if (!mem.seg(at)) return 0;
+      var u = mem.u32(at);
+      var off = u & 0x80000000 ? u - 4294967296 : u;
+      if (!off || off > 268435456 || off < -268435456) return 0;
+      var target = at + off;
+      return mem.seg(target) ? target : 0;
+    }
+    function allocMeta(desc, kind) {
+      var ptr = bump;
+      bump += 256;
+      mem.w64(ptr + 8, kind || 1);
+      if (desc) mem.w64(ptr + 16, desc);
+      return ptr;
+    }
+    function singletonInit(desc) {
+      if (!desc || !mem.seg(desc)) return null;
+      var flags = mem.u32(desc);
+      var kind = flags & 31;
+      if (((flags >>> 16) & 3) !== 1 || (flags & 128) !== 0) return null;
+      var cursor = 0;
+      if (kind === 16) cursor = desc + 44 + (((flags >>> 16) & 8192) !== 0 ? 4 : 0);
+      else if (kind === 17 || kind === 18) cursor = desc + 28;
+      else return null;
+      if (!mem.seg(cursor + 8)) return null;
+      return { cache: sex32(cursor), incomplete: sex32(cursor + 4), completion: sex32(cursor + 8) };
+    }
+    function callGuest(fn, a0, a1, a2, done) {
+      retStack.push({ back: x[30], done: done });
+      redirect = fn;
+      x[1] = a1 || 0;
+      x[2] = a2 || 0;
+      x[30] = retSlot;
+      return a0 || 0;
+    }
     function call(addr) {
       var name = image.stubs[addr];
       redirect = 0;
@@ -649,7 +689,19 @@
         stop = "Unmapped call at " + addr.toString(16);
         return 0;
       }
-      remember(name);
+      if (name !== "hostReturn") remember(name);
+      if (name === "hostReturn") {
+        var frame = retStack.pop();
+        if (!frame) {
+          redirect = 1;
+          return 0;
+        }
+        var out = frame.done(x[0]) || { x0: 0 };
+        x[1] = out.x1 || 0;
+        x[2] = out.x2 || 0;
+        redirect = frame.back || 1;
+        return out.x0 || 0;
+      }
       if (name === "UIApplicationMain") {
         hitMain = true;
         var delegateName = textOf(x[3]);
@@ -735,14 +787,10 @@
       if (name === "realloc") return x[0] || call.malloc || bump;
       if (name === "free") return 0;
       if (name === "__error") return 0x400000000;
-      if (name === "dispatch_once_f") {
+      if (name === "dispatch_once_f" || name === "dispatch_once") {
         if (x[0] && mem.u64(x[0]) === 0) {
           mem.w64(x[0], 1);
-          if (x[2]) {
-            redirect = x[2];
-            x[0] = x[1];
-            x[30] = 1;
-          }
+          if (name === "dispatch_once_f" && x[2]) return callGuest(x[2], x[1], 0, 0, function () { return { x0: 0 }; });
         }
         return 0;
       }
@@ -816,6 +864,64 @@
         if (x[2]) mem.w64(x[2], val.length + 1);
         return 0;
       }
+      if (name === "swift_getSingletonMetadata") {
+        var desc = x[1];
+        var init = singletonInit(desc);
+        if (init && init.cache) {
+          var ready = mem.u64(init.cache);
+          if (ready) {
+            x[1] = 0;
+            return ready;
+          }
+        }
+        var meta = (init && init.incomplete) || allocMeta(desc, desc && (mem.u32(desc) & 31) === 16 ? 0 : 1);
+        if (init && init.completion && !swiftBusy[desc]) {
+          swiftBusy[desc] = 1;
+          return callGuest(init.completion, meta, 0, 0, function () {
+            swiftBusy[desc] = 0;
+            if (init.cache) mem.w64(init.cache, meta);
+            return { x0: meta, x1: 0 };
+          });
+        }
+        if (init && init.cache) mem.w64(init.cache, meta);
+        x[1] = 0;
+        return meta;
+      }
+      if (name === "swift_checkMetadataState" || name === "swift_getForeignTypeMetadata") {
+        var foundMeta = x[1];
+        x[1] = 0;
+        return foundMeta;
+      }
+      if (name === "swift_once") {
+        if (x[0] && mem.u32(x[0]) === 0 && x[1]) {
+          mem.w32(x[0], 1);
+          return callGuest(x[1], x[2], 0, 0, function () { return { x0: 0 }; });
+        }
+        return 0;
+      }
+      if (name === "swift_allocObject" || name === "swift_allocBox") {
+        var bytes = Math.min(Math.max(x[1] || 64, 16), 65536);
+        var obj = bump;
+        bump += (bytes + 15) & ~15;
+        if (x[0]) mem.w64(obj, x[0]);
+        return obj;
+      }
+      if (name === "swift_slowAlloc") {
+        var heap = bump;
+        bump += (Math.min(Math.max(x[0] || 16, 16), 65536) + 15) & ~15;
+        return heap;
+      }
+      if (name === "swift_slowDealloc" || name === "swift_deallocObject" || name === "swift_deallocClassInstance" || name === "swift_deletedMethodError") return 0;
+      if (name.indexOf("swift_retain") === 0 || name.indexOf("swift_bridgeObjectRetain") === 0 || name.indexOf("swift_unknownObjectRetain") === 0 || name === "swift_bridgeObjectRetain_n") return x[0];
+      if (name.indexOf("swift_release") === 0 || name.indexOf("swift_bridgeObjectRelease") === 0 || name.indexOf("swift_unknownObjectRelease") === 0) return 0;
+      if (name === "swift_getObjCClassFromMetadata" || name === "swift_getObjCClassMetadata" || name === "swift_getInitializedObjCClass") return x[0];
+      if (name.indexOf("swift_getTypeByMangledName") === 0 || name === "swift_getGenericMetadata") {
+        var key = String(x[0] || 0) + ":" + String(name === "swift_getGenericMetadata" ? x[2] : x[1] || 0);
+        if (!typeCache[key]) typeCache[key] = allocMeta(name === "swift_getGenericMetadata" ? x[2] : 0, 1);
+        x[1] = 0;
+        return typeCache[key];
+      }
+      if (name === "swift_initClassMetadata" || name === "swift_initClassMetadata2" || name === "swift_updateClassMetadata2" || name === "swift_initStructMetadata" || name === "swift_initEnumMetadataSinglePayload" || name === "swift_initEnumMetadataMultiPayload" || name === "swift_initStaticObject") return 0;
       stop = "The guest calls " + name + ". This host does not provide that call.";
       redirect = 1;
       return 0;
