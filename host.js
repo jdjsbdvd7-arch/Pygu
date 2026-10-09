@@ -334,6 +334,8 @@
     var entry = 0;
     var segs = [];
     var fix = null;
+    var symtab = null;
+    var trie = null;
     var p = 32;
     var c;
     for (c = 0; c < commands; c += 1) {
@@ -367,6 +369,10 @@
         entry = u64(p + 8);
       } else if (cmd === 0x80000034 && size >= 16) {
         fix = { off: u32(p + 8), size: u32(p + 12) };
+      } else if (cmd === 2 && size >= 24) {
+        symtab = { symoff: u32(p + 8), nsyms: u32(p + 12), stroff: u32(p + 16), strsize: u32(p + 20) };
+      } else if (cmd === 0x80000033 && size >= 16) {
+        trie = { off: u32(p + 8), size: u32(p + 12) };
       }
       p += size;
     }
@@ -447,7 +453,77 @@
         }
       }
     }
-    return { mem: mem, entry: base + entry, base: base, stubs: stubs, bytes: bytes };
+    var defined = [];
+    function note(name, addr) {
+      if (!name || !addr) return;
+      if (name.charAt(0) === "_") name = name.slice(1);
+      if (defined.length < 4000) defined.push({ name: name, addr: addr });
+    }
+    if (symtab && symtab.symoff && symtab.nsyms && symtab.nsyms < 80000) {
+      var ns;
+      for (ns = 0; ns < symtab.nsyms; ns += 1) {
+        var np = symtab.symoff + ns * 16;
+        if (np + 16 > bytes.length) break;
+        var ntype = bytes[np + 4];
+        if ((ntype & 0x0e) !== 0x0e) continue;
+        var nstr = view.getUint32(np, true);
+        var nval = Number(view.getBigUint64(np + 8, true));
+        if (symtab.stroff + nstr >= bytes.length) continue;
+        note(cstring(bytes, symtab.stroff + nstr, Math.min(bytes.length, symtab.stroff + symtab.strsize)), nval);
+      }
+    }
+    if (trie && trie.off && trie.size && trie.off + trie.size <= bytes.length) {
+      var seen = {};
+      function ulebAt(off) {
+        var result = 0;
+        var shift = 0;
+        var b = 0;
+        while (off < bytes.length && shift < 35) {
+          b = bytes[off];
+          off += 1;
+          result += (b & 0x7f) * Math.pow(2, shift);
+          if ((b & 0x80) === 0) break;
+          shift += 7;
+        }
+        return { v: result, off: off };
+      }
+      function walkTrie(node, prefix, depth) {
+        if (depth > 24 || node < trie.off || node >= trie.off + trie.size || seen[node]) return;
+        seen[node] = 1;
+        var term = ulebAt(node);
+        var after = term.off + term.v;
+        if (term.v) {
+          var flags = ulebAt(term.off);
+          if ((flags.v & 8) === 0) {
+            var rel = ulebAt(flags.off);
+            note(prefix, base + rel.v);
+          }
+        }
+        if (after >= bytes.length) return;
+        var kids = bytes[after];
+        var cursor = after + 1;
+        var ki;
+        for (ki = 0; ki < kids; ki += 1) {
+          var edge = "";
+          while (cursor < bytes.length && bytes[cursor] !== 0) {
+            edge += String.fromCharCode(bytes[cursor]);
+            cursor += 1;
+          }
+          cursor += 1;
+          var next = ulebAt(cursor);
+          walkTrie(trie.off + next.v, prefix + edge, depth + 1);
+          cursor = next.off;
+        }
+      }
+      walkTrie(trie.off, "", 0);
+    }
+    var ui = { body: 0, launch: 0 };
+    var di;
+    for (di = 0; di < defined.length; di += 1) {
+      if (!ui.body && defined[di].name.indexOf("4body") !== -1) ui.body = defined[di].addr;
+      if (!ui.launch && defined[di].name.indexOf("didFinishLaunching") !== -1) ui.launch = defined[di].addr;
+    }
+    return { mem: mem, entry: base + entry, base: base, stubs: stubs, bytes: bytes, ui: ui };
   }
 
   function sex32(value) {
@@ -563,6 +639,7 @@
     var views = [];
     var logs = [];
     var hitMain = false;
+    var launched = false;
     var stop = "";
     var steps = 0;
     var objects = {};
@@ -635,6 +712,30 @@
       if (direct) return direct;
       var ptr = mem.u64(addr + 16);
       return ptr ? mem.str(ptr) : "";
+    }
+    function uiEntry() {
+      if (launched) return 0;
+      var keys = Object.keys(classes);
+      var i;
+      var sel;
+      for (i = 0; i < keys.length; i += 1) {
+        var imps = classes[keys[i]].imps || {};
+        for (sel in imps) {
+          if (sel.indexOf("didFinishLaunching") !== -1 || sel.indexOf("willConnect") !== -1) {
+            launched = true;
+            return imps[sel];
+          }
+        }
+      }
+      if (image.ui && image.ui.launch) {
+        launched = true;
+        return image.ui.launch;
+      }
+      if (image.ui && image.ui.body) {
+        launched = true;
+        return image.ui.body;
+      }
+      return 0;
     }
     function remember(name) {
       if (!name) return;
@@ -791,6 +892,22 @@
     }
     function swiftSymbol(name) {
       var tail = name.slice(-2);
+      if (/mainyyFZ$/.test(name)) {
+        hitMain = true;
+        var nextFn = uiEntry();
+        if (nextFn) return callGuest(nextFn, fresh("application", "UIApplication"), 0, 0, function () { return { x0: 0 }; });
+      }
+      if (name.indexOf("7SwiftUI4Text") !== -1 || name.indexOf("6Button") !== -1 || name.indexOf("5Label") !== -1) {
+        hitMain = true;
+        var shown = "";
+        var ri;
+        for (ri = 0; ri < 4; ri += 1) {
+          var piece = textOf(x[ri]);
+          if (piece && piece.length > 1 && piece.length < 180) { shown = piece; break; }
+        }
+        if (shown) views.push({ kind: "label", text: shown });
+        return fresh("label", shown || "Text");
+      }
       if (tail === "Ma" || tail === "Mi" || tail === "Wt" || tail === "TM") {
         x[1] = 0;
         return shapeNamed(name);
@@ -842,6 +959,13 @@
       if (name === "swiftWitness") return x[0];
       if (name === "swiftLookup") return 0;
       if (name === "guestExit") {
+        var nextFn = uiEntry();
+        if (nextFn) {
+          hitMain = true;
+          redirect = nextFn;
+          x[30] = exitSlot;
+          return fresh("application", "UIApplication");
+        }
         redirect = 1;
         return x[0];
       }
@@ -1076,6 +1200,15 @@
       if (name.indexOf("os_") === 0 || name.indexOf("pthread_") === 0 || name.indexOf("dispatch_") === 0 || name.indexOf("voucher_") === 0) return 0;
       if (name.indexOf("arc4random") === 0) return (Math.random() * 4294967296) >>> 0;
       if (name === "mach_absolute_time" || name === "clock_gettime_nsec_np") return Date.now() * 1000000;
+      if (/^(CF|CG|CT|CA|UI|NS|Sec|MTL|AV|WK|swift_)/.test(name)) {
+        var made = textOf(x[0]) || textOf(x[1]) || textOf(x[2]);
+        if (made && (name.indexOf("String") !== -1 || name.indexOf("Text") !== -1)) {
+          views.push({ kind: "label", text: made });
+          return put({ kind: "string", text: made, className: "NSString" });
+        }
+        if (name.indexOf("Create") !== -1 || name.indexOf("Alloc") !== -1 || name.indexOf("Copy") !== -1) return fresh("object", name);
+        return x[0] || 0;
+      }
       stop = "The guest calls " + name + ". This host does not provide that call.";
       redirect = 1;
       return 0;
