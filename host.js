@@ -597,6 +597,7 @@
       if (onStack(addr)) return readStack(addr, size);
       if (size === 8) return mem.u64(addr);
       if (size === 4) return mem.u32(addr);
+      if (size === 2) return mem.u8(addr) | (mem.u8(addr + 1) << 8);
       if (size === 1) return mem.u8(addr);
       return 0;
     }
@@ -607,7 +608,10 @@
       }
       if (size === 8) mem.w64(addr, value);
       else if (size === 4) mem.w32(addr, value);
-      else if (size === 1) mem.w8(addr, value & 255, 1);
+      else if (size === 2) {
+        mem.w8(addr, value & 255, 1);
+        mem.w8(addr + 1, (value >>> 8) & 255, 1);
+      } else if (size === 1) mem.w8(addr, value & 255, 1);
     }
     function reg(i) {
       if (i === 31) return sp;
@@ -616,6 +620,12 @@
     function wreg(i, value) {
       if (i === 31) sp = value;
       else x[i] = value;
+    }
+    function gpr(i) {
+      return i === 31 ? 0 : (x[i] || 0);
+    }
+    function wgpr(i, value) {
+      if (i !== 31) x[i] = value;
     }
     function textOf(addr) {
       if (!addr) return "";
@@ -767,13 +777,22 @@
         if (line) logs.push(line);
         return 0;
       }
-      if (name === "memset" || name === "bzero" || name === "__bzero") {
-        mem.w8(x[0], name === "memset" ? x[1] : 0, Math.min(x[2] || (name === "memset" ? 0 : x[1]) || 0, 65536));
+      if (name === "memset" || name === "bzero" || name === "__bzero" || name === "__memset_chk") {
+        mem.w8(x[0], name === "memset" || name === "__memset_chk" ? x[1] : 0, Math.min(x[2] || (name === "memset" || name === "__memset_chk" ? 0 : x[1]) || 0, 65536));
         return x[0];
       }
-      if (name === "memcpy" || name === "memmove" || name === "bcopy") {
+      if (name === "memcpy" || name === "memmove" || name === "bcopy" || name === "__memcpy_chk" || name === "__memmove_chk") {
         mem.copy(x[0], x[1], Math.min(x[2] || 0, 65536));
         return x[0];
+      }
+      if (name === "memcmp" || name === "bcmp") {
+        var span = Math.min(x[2] || 0, 65536);
+        var bi;
+        for (bi = 0; bi < span; bi += 1) {
+          var delta = mem.u8(x[0] + bi) - mem.u8(x[1] + bi);
+          if (delta) return delta < 0 ? -1 : 1;
+        }
+        return 0;
       }
       if (name === "strlen") return textOf(x[0]).length;
       if (name === "strcmp" || name === "strncmp") return textOf(x[0]) === textOf(x[1]) ? 0 : 1;
@@ -983,6 +1002,243 @@
     x[1] = argvArr;
     x[2] = envArr;
     x[3] = appleArr;
+    function sxLoad(value, bytes, narrow) {
+      var bits = bytes * 8;
+      if (bits >= 64) return value;
+      var sign = bits === 32 ? 0x80000000 : 1 << (bits - 1);
+      var span = bits === 32 ? 0x100000000 : sign * 2;
+      if (value & sign) value -= span;
+      if (narrow) value &= 0xffffffff;
+      return value;
+    }
+    function big64(value) {
+      var n = BigInt(Math.trunc(value || 0));
+      if (n < 0n) n += 1n << 64n;
+      return n & ((1n << 64n) - 1n);
+    }
+    function num64(value) {
+      return Number(value & ((1n << 64n) - 1n));
+    }
+    function bitmask(immN, imms, immr, datasize) {
+      var combined = ((immN & 1) << 6) | ((~imms) & 63);
+      var len = -1;
+      var bit;
+      for (bit = 6; bit >= 0; bit -= 1) if ((combined >>> bit) & 1) { len = bit; break; }
+      if (len < 1) return null;
+      var size = 1 << len;
+      if (size > datasize) return null;
+      var levels = size - 1;
+      var S = imms & levels;
+      var R = immr & levels;
+      if (S === levels) return null;
+      var welem = (1n << BigInt(S + 1)) - 1n;
+      var rot = R & (size - 1);
+      var elem = rot ? ((welem >> BigInt(rot)) | (welem << BigInt(size - rot))) & ((1n << BigInt(size)) - 1n) : welem;
+      var mask = 0n;
+      var at;
+      for (at = 0; at < datasize; at += size) mask |= elem << BigInt(at);
+      return mask & ((1n << BigInt(datasize)) - 1n);
+    }
+    function shifted(value, kind, amount, wide) {
+      var bits = wide ? 64 : 32;
+      var n = big64(value) & ((1n << BigInt(bits)) - 1n);
+      amount &= bits - 1;
+      if (kind === 0) n <<= BigInt(amount);
+      else if (kind === 1) n >>= BigInt(amount);
+      else if (kind === 2) {
+        var signed = n & (1n << BigInt(bits - 1)) ? n - (1n << BigInt(bits)) : n;
+        n = signed >> BigInt(amount);
+        if (n < 0n) n += 1n << BigInt(bits);
+      } else if (amount) n = ((n >> BigInt(amount)) | (n << BigInt(bits - amount))) & ((1n << BigInt(bits)) - 1n);
+      return n & ((1n << BigInt(bits)) - 1n);
+    }
+    function writeFlags(result, wide, carry, overflow) {
+      var bits = wide ? 64 : 32;
+      var masked = result & ((1n << BigInt(bits)) - 1n);
+      z = masked === 0n ? 1 : 0;
+      n = (masked >> BigInt(bits - 1)) & 1n ? 1 : 0;
+      cflag = carry ? 1 : 0;
+      vflag = overflow ? 1 : 0;
+      return wide ? num64(masked) : Number(masked);
+    }
+    function moreArm(word) {
+      var wide = (word & 0x80000000) !== 0;
+      var rd = word & 31;
+      var rn = (word >>> 5) & 31;
+      var rm = (word >>> 16) & 31;
+      if ((word & 0xffe0001f) === 0xd4000001 || (word & 0xffe0001f) === 0xd4000002 || (word & 0xffe0001f) === 0xd4000003) {
+        x[0] = 0;
+        logs.push("svc " + ((word >>> 5) & 0xffff));
+        return true;
+      }
+      if ((word & 0xffe0001f) === 0xd4200000 || (word & 0xffe0001f) === 0xd4400000) {
+        stop = (word & 0xffe0001f) === 0xd4200000 ? "The guest raised a breakpoint." : "The guest halted.";
+        return false;
+      }
+      if ((word & 0xfff00000) === 0xd5300000) {
+        wgpr(rd, proc && proc.thread ? proc.thread : 0x180001000);
+        return true;
+      }
+      if ((word & 0xfff00000) === 0xd5100000 || (word >>> 20) === 0xdac || (word >>> 20) === 0xdad) return true;
+      if ((word & 0x1f800000) === 0x12000000) {
+        var mask = bitmask((word >>> 22) & 1, (word >>> 10) & 63, (word >>> 16) & 63, wide ? 64 : 32);
+        if (mask === null) return false;
+        var opc = (word >>> 29) & 3;
+        var left = big64(gpr(rn));
+        var out = opc === 1 ? (left | mask) : opc === 2 ? (left ^ mask) : (left & mask);
+        if (!wide) out &= 0xffffffffn;
+        if (opc === 3) wgpr(rd, writeFlags(out, wide, 0, 0));
+        else wgpr(rd, wide ? num64(out) : Number(out));
+        return true;
+      }
+      if ((word & 0x1f800000) === 0x13000000) {
+        var bits = wide ? 64 : 32;
+        var immr = (word >>> 16) & 63;
+        var imms = (word >>> 10) & 63;
+        var src = big64(gpr(rn)) & ((1n << BigInt(bits)) - 1n);
+        var bopc = (word >>> 29) & 3;
+        var rotated = immr ? ((src >> BigInt(immr)) | (src << BigInt(bits - immr))) & ((1n << BigInt(bits)) - 1n) : src;
+        var outb;
+        if (bopc === 2) {
+          var width = imms + 1;
+          outb = rotated & ((1n << BigInt(width > bits ? bits : width)) - 1n);
+        } else if (bopc === 0) {
+          var top = imms >= immr ? imms : bits - 1;
+          var field = rotated & ((1n << BigInt(top + 1 > bits ? bits : top + 1)) - 1n);
+          var signAt = Math.min(imms, bits - 1);
+          if (field & (1n << BigInt(signAt))) field |= ~((1n << BigInt(signAt + 1)) - 1n);
+          outb = field & ((1n << BigInt(bits)) - 1n);
+        } else {
+          var bot = imms >= immr ? imms : bits - 1;
+          var keep = ((1n << BigInt(bot + 1)) - 1n) & ((1n << BigInt(bits)) - 1n);
+          outb = (big64(gpr(rd)) & ~keep) | (rotated & keep);
+        }
+        wgpr(rd, wide ? num64(outb) : Number(outb & 0xffffffffn));
+        return true;
+      }
+      if ((word & 0x1f200000) === 0x0b000000 && (word & 0x00200000) === 0) {
+        var amount = (word >>> 10) & 63;
+        var kind = (word >>> 22) & 3;
+        var shiftedRm = shifted(gpr(rm), kind, amount, wide);
+        var base = big64(gpr(rn));
+        var sub = (word & 0x40000000) !== 0;
+        var sum = sub ? base - shiftedRm : base + shiftedRm;
+        var bitsn = wide ? 64 : 32;
+        var outr = sum & ((1n << BigInt(bitsn)) - 1n);
+        if ((word & 0x20000000) !== 0) {
+          var carry = sub ? base >= shiftedRm : outr < (base & ((1n << BigInt(bitsn)) - 1n));
+          var sb = (base >> BigInt(bitsn - 1)) & 1n;
+          var sm = (shiftedRm >> BigInt(bitsn - 1)) & 1n;
+          var so = (outr >> BigInt(bitsn - 1)) & 1n;
+          var overflow = sub ? sb !== sm && sb !== so : sb === sm && sb !== so;
+          wgpr(rd, writeFlags(outr, wide, carry, overflow));
+        } else wgpr(rd, wide ? num64(outr) : Number(outr));
+        return true;
+      }
+      if ((word & 0x1fe00000) === 0x0b200000) {
+        var option = (word >>> 13) & 7;
+        var ebits = option === 0 || option === 4 ? 8 : option === 1 || option === 5 ? 16 : option === 2 || option === 6 ? 32 : 64;
+        var ext = big64(gpr(rm)) & ((1n << BigInt(ebits)) - 1n);
+        if (option >= 4 && ext & (1n << BigInt(ebits - 1))) ext |= ~((1n << BigInt(ebits)) - 1n);
+        var eshift = (word >>> 10) & 7;
+        if (eshift > 4) return false;
+        var extended = (ext << BigInt(eshift)) & ((1n << (wide ? 64n : 32n)) - 1n);
+        var ebase = big64(rn === 31 ? reg(31) : gpr(rn));
+        var esub = (word & 0x40000000) !== 0;
+        var esum = (esub ? ebase - extended : ebase + extended) & ((1n << (wide ? 64n : 32n)) - 1n);
+        if (rd === 31) wreg(31, num64(esum));
+        else wgpr(rd, wide ? num64(esum) : Number(esum));
+        return true;
+      }
+      if ((word & 0x1f000000) === 0x0a000000) {
+        var lkind = (word >>> 22) & 3;
+        var lamt = (word >>> 10) & 63;
+        var lsrc = shifted(gpr(rm), lkind, lamt, wide);
+        if ((word & 0x00200000) !== 0) lsrc = ~lsrc;
+        var lbase = big64(gpr(rn));
+        var lop = (word >>> 29) & 3;
+        var lout = lop === 1 ? (lbase | lsrc) : lop === 2 ? (lbase ^ lsrc) : (lbase & lsrc);
+        if (!wide) lout &= 0xffffffffn;
+        if (lop === 3) wgpr(rd, writeFlags(lout, wide, 0, 0));
+        else wgpr(rd, wide ? num64(lout) : Number(lout));
+        return true;
+      }
+      if ((word & 0x1fe00000) === 0x1a800000) {
+        var ok = cond((word >>> 12) & 15);
+        var alt = gpr(rm);
+        var chosen = ok ? gpr(rn) : alt;
+        var c2 = (word >>> 10) & 3;
+        var invert = (word & 0x40000000) !== 0;
+        if (!ok && c2 === 1 && !invert) chosen = (alt + 1) | 0;
+        if (!ok && invert && c2 === 0) chosen = ~alt;
+        if (!ok && invert && c2 === 1) chosen = -alt;
+        if (!wide) chosen >>>= 0;
+        wgpr(rd, chosen);
+        return true;
+      }
+      if ((word & 0x7fe08000) === 0x1b000000) {
+        var prod = big64(gpr(rn)) * big64(gpr(rm));
+        if ((word & 0x8000) !== 0) prod = -prod;
+        var madd = (prod + big64(gpr((word >>> 10) & 31))) & ((1n << (wide ? 64n : 32n)) - 1n);
+        wgpr(rd, wide ? num64(madd) : Number(madd));
+        return true;
+      }
+      if ((word & 0x5fe00000) === 0x1ac00000) {
+        var op2 = (word >>> 10) & 63;
+        var lhs = big64(gpr(rn));
+        var rhs = big64(gpr(rm));
+        var bits2 = wide ? 64n : 32n;
+        var div;
+        if (op2 === 2 || op2 === 3) {
+          if ((rhs & ((1n << bits2) - 1n)) === 0n) div = 0n;
+          else if (op2 === 2) div = (lhs & ((1n << bits2) - 1n)) / (rhs & ((1n << bits2) - 1n));
+          else {
+            var sl = lhs & (1n << (bits2 - 1n)) ? lhs - (1n << bits2) : lhs;
+            var sr = rhs & (1n << (bits2 - 1n)) ? rhs - (1n << bits2) : rhs;
+            div = sr === 0n ? 0n : sl / sr;
+            if (div < 0n) div += 1n << bits2;
+          }
+        } else if (op2 === 8) div = lhs << (rhs & (bits2 - 1n));
+        else if (op2 === 9) div = (lhs & ((1n << bits2) - 1n)) >> (rhs & (bits2 - 1n));
+        else if (op2 === 10) div = shifted(gpr(rn), 2, Number(rhs & (bits2 - 1n)), wide);
+        else if (op2 === 11) div = shifted(gpr(rn), 3, Number(rhs & (bits2 - 1n)), wide);
+        else return false;
+        div &= (1n << bits2) - 1n;
+        wgpr(rd, wide ? num64(div) : Number(div));
+        return true;
+      }
+      if ((word & 0x5fe00000) === 0x5ac00000) {
+        var one = (word >>> 10) & 63;
+        var src1 = big64(gpr(rn));
+        var bits1 = wide ? 64 : 32;
+        var single = 0n;
+        if (one === 0) {
+          var rb;
+          for (rb = 0; rb < bits1; rb += 1) if ((src1 >> BigInt(rb)) & 1n) single |= 1n << BigInt(bits1 - 1 - rb);
+        } else if (one === 4 || one === 5) {
+          var count = 0;
+          var scan = one === 4 ? src1 : ~src1;
+          var rs;
+          for (rs = bits1 - 1; rs >= 0; rs -= 1) {
+            if ((scan >> BigInt(rs)) & 1n) break;
+            count += 1;
+          }
+          single = BigInt(count);
+        } else if (one === 2 || one === 3) {
+          var chunk = one === 3 || !wide ? bits1 : 32;
+          var rc;
+          for (rc = 0; rc < bits1; rc += 8) {
+            var byte = (src1 >> BigInt(rc)) & 0xffn;
+            var slot = rc - (rc % chunk) + (chunk - 8 - (rc % chunk));
+            single |= byte << BigInt(slot);
+          }
+        } else return false;
+        single &= (1n << BigInt(bits1)) - 1n;
+        wgpr(rd, wide ? num64(single) : Number(single));
+        return true;
+      }
+      return false;
+    }
     var guard = 0;
     while (!stop && guard < 1500000) {
       guard += 1;
@@ -1007,7 +1263,8 @@
         continue;
       }
       if (word === 0xd65f0bff || word === 0xd65f0fff || is(0xfffffc1f, 0xd65f0000)) {
-        pc = word === 0xd65f0bff || word === 0xd65f0fff ? (x[30] || 1) : (rn === 31 ? 0 : reg(rn));
+        var retTo = word === 0xd65f0bff || word === 0xd65f0fff || rn === 30 ? x[30] : reg(rn);
+        pc = retTo || 1;
         continue;
       }
       if (is(0xfffffc1f, 0xd63f0000) || is(0xfffffc1f, 0xd63f0800)) {
@@ -1030,8 +1287,8 @@
         pc = cond(word & 15) ? pc + sex((word >>> 5) & 0x7ffff, 19) * 4 : next;
         continue;
       }
-      if (is(0x7f000000, 0x34000000)) {
-        var compared = (word & 0x80000000) ? reg(rd) : (reg(rd) & 0xffffffff);
+      if (is(0x7e000000, 0x34000000)) {
+        var compared = (word & 0x80000000) ? gpr(rd) : (gpr(rd) & 0xffffffff);
         var take = (word & 0x01000000) ? compared !== 0 : compared === 0;
         pc = take ? pc + sex((word >>> 5) & 0x7ffff, 19) * 4 : next;
         continue;
@@ -1079,37 +1336,112 @@
         pc = next;
         continue;
       }
-      if (is(0xffc00000, 0xf9400000) || is(0xffc00000, 0xb9400000) || is(0xffc00000, 0x39400000)) {
-        var scale = is(0xffc00000, 0xf9400000) ? 8 : is(0xffc00000, 0xb9400000) ? 4 : 1;
-        var addr = reg(rn) + ((word >>> 10) & 0xfff) * scale;
-        var loaded = load(addr, scale);
-        if (rd !== 31) wreg(rd, scale === 4 ? loaded >>> 0 : loaded);
-        pc = next;
-        continue;
-      }
-      if (is(0xffc00000, 0xf9000000) || is(0xffc00000, 0xb9000000) || is(0xffc00000, 0x39000000)) {
-        var stScale = is(0xffc00000, 0xf9000000) ? 8 : is(0xffc00000, 0xb9000000) ? 4 : 1;
-        store(reg(rn) + ((word >>> 10) & 0xfff) * stScale, rd === 31 ? 0 : reg(rd), stScale);
-        pc = next;
-        continue;
-      }
-      if (is(0xffc00000, 0xa9000000) || is(0xffc00000, 0xa9400000) || is(0xffc00000, 0xa9800000) || is(0xffc00000, 0xa9c00000)) {
-        var off = sex((word >>> 15) & 0x7f, 7) * 8;
-        var rt2 = (word >>> 10) & 31;
-        var writeback = is(0xffc00000, 0xa9800000) || is(0xffc00000, 0xa9c00000);
-        var baseAddr = reg(rn) + off;
-        if (is(0x00400000, 0x00400000)) {
-          if (rd !== 31) wreg(rd, load(baseAddr, 8));
-          if (rt2 !== 31) wreg(rt2, load(baseAddr + 8, 8));
-        } else {
-          if (rd !== 31) store(baseAddr, reg(rd), 8);
-          if (rt2 !== 31) store(baseAddr + 8, reg(rt2), 8);
+      if ((word & 0x3b000000) === 0x39000000 && (word & 0x04000000) === 0) {
+        var usize = (word >>> 30) & 3;
+        var uopc = (word >>> 22) & 3;
+        var ubytes = 1 << usize;
+        var uaddr = reg(rn) + ((word >>> 10) & 0xfff) * ubytes;
+        if (uopc === 0) store(uaddr, rd === 31 ? 0 : gpr(rd), ubytes);
+        else {
+          var uload = load(uaddr, ubytes);
+          if ((uopc & 2) !== 0) uload = sxLoad(uload, ubytes, (uopc & 1) !== 0);
+          else if (ubytes < 8) uload >>>= 0;
+          wgpr(rd, uload);
         }
-        if (writeback) wreg(rn, baseAddr);
         pc = next;
         continue;
       }
-      stop = "The guest stopped on an unknown instruction " + (word >>> 0).toString(16);
+      if ((word & 0x3b000000) === 0x39000000 && (word & 0x04000000) !== 0) {
+        var vsize = ((word >>> 30) & 3) | (((word >>> 22) & 2) << 1);
+        var vbytes = 1 << vsize;
+        var vaddr = reg(rn) + ((word >>> 10) & 0xfff) * vbytes;
+        var vslot = (rd & 31) * 16;
+        var vb;
+        if (!image.vreg) image.vreg = new Uint8Array(32 * 16);
+        if (((word >>> 22) & 1) === 0) {
+          for (vb = 0; vb < vbytes; vb += 1) mem.w8(vaddr + vb, image.vreg[vslot + vb] || 0, 1);
+        } else {
+          for (vb = 0; vb < vbytes; vb += 1) image.vreg[vslot + vb] = mem.u8(vaddr + vb);
+        }
+        pc = next;
+        continue;
+      }
+      if ((word & 0x3b200c00) === 0x38000000 || (word & 0x3b200c00) === 0x38000400 || (word & 0x3b200c00) === 0x38000c00) {
+        var imm9 = sex((word >>> 12) & 0x1ff, 9);
+        var modeBits = (word >>> 10) & 3;
+        var maddr = reg(rn);
+        var msize = 1 << ((word >>> 30) & 3);
+        var mopc = (word >>> 22) & 3;
+        if (modeBits === 3) maddr += imm9;
+        if ((word & 0x04000000) === 0) {
+          if (mopc === 0) store(maddr, rd === 31 ? 0 : gpr(rd), msize);
+          else {
+            var mload = load(maddr, msize);
+            if ((mopc & 2) !== 0) mload = sxLoad(mload, msize, (mopc & 1) !== 0);
+            else if (msize < 8) mload >>>= 0;
+            wgpr(rd, mload);
+          }
+        }
+        if (modeBits === 1) wreg(rn, reg(rn) + imm9);
+        if (modeBits === 3) wreg(rn, maddr);
+        pc = next;
+        continue;
+      }
+      if ((word & 0x3b200c00) === 0x38200800 && (word & 0x04000000) === 0) {
+        var rsize = 1 << ((word >>> 30) & 3);
+        var ropc = (word >>> 22) & 3;
+        var ropt = (word >>> 13) & 7;
+        var ramount = ((word >>> 12) & 1) ? rsize : 1;
+        var rval = gpr((word >>> 16) & 31);
+        if (ropt === 0 || ropt === 4) rval &= 255;
+        if (ropt === 1 || ropt === 5) rval &= 65535;
+        if (ropt === 2 || ropt === 6) rval >>>= 0;
+        if (ropt >= 4 && ropt <= 6) rval = sex(rval, ropt === 4 ? 8 : ropt === 5 ? 16 : 32);
+        var raddr = reg(rn) + rval * ramount;
+        if (ropc === 0) store(raddr, rd === 31 ? 0 : gpr(rd), rsize);
+        else {
+          var rload = load(raddr, rsize);
+          if ((ropc & 2) !== 0) rload = sxLoad(rload, rsize, (ropc & 1) !== 0);
+          else if (rsize < 8) rload >>>= 0;
+          wgpr(rd, rload);
+        }
+        pc = next;
+        continue;
+      }
+      if ((word & 0x3e000000) === 0x28000000) {
+        var pmode = (word >>> 23) & 3;
+        var pscale = (word & 0x80000000) ? 8 : 4;
+        var poff = sex((word >>> 15) & 0x7f, 7) * pscale;
+        var prt2 = (word >>> 10) & 31;
+        var paddr = reg(rn);
+        if (pmode === 2 || pmode === 3) paddr += poff;
+        if ((word >>> 22) & 1) {
+          wgpr(rd, pscale === 4 ? load(paddr, 4) >>> 0 : load(paddr, 8));
+          wgpr(prt2, pscale === 4 ? load(paddr + pscale, 4) >>> 0 : load(paddr + pscale, 8));
+        } else {
+          store(paddr, gpr(rd), pscale);
+          store(paddr + pscale, gpr(prt2), pscale);
+        }
+        if (pmode === 1) wreg(rn, reg(rn) + poff);
+        if (pmode === 3) wreg(rn, paddr);
+        pc = next;
+        continue;
+      }
+      if ((word & 0x7e000000) === 0x36000000) {
+        var tbit = ((word >>> 31) << 5) | ((word >>> 19) & 31);
+        var tbig = BigInt(Math.trunc(gpr(rd) || 0));
+        if (tbig < 0n) tbig += 1n << 64n;
+        var tset = Number((tbig >> BigInt(tbit)) & 1n);
+        var twant = (word & 0x01000000) ? 1 : 0;
+        pc = tset === twant ? pc + sex((word >>> 5) & 0x3fff, 14) * 4 : next;
+        continue;
+      }
+      if (moreArm(word)) {
+        pc = next;
+        continue;
+      }
+      if (stop) break;
+      stop = "The guest stopped on an unknown instruction " + (word >>> 0).toString(16) + " at " + pc.toString(16);
       break;
     }
     steps = guard;
