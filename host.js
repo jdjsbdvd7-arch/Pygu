@@ -1587,7 +1587,7 @@
   function start(mount) {
     mount.className = "host";
     mount.replaceChildren();
-    var model = { tab: "now", guest: null, error: "", busy: false, shelf: [], booted: 0 };
+    var model = { tab: "now", guest: null, error: "", busy: false, shelf: [], booted: 0, mode: "dock", float: { x: 18, y: 92 } };
     var icons = {
       now: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
       shelf: "M5 7h14M5 12h14M5 17h8",
@@ -1729,6 +1729,105 @@
       return button;
     }
 
+    function setMode(mode) {
+      model.mode = mode;
+      draw();
+    }
+
+    function buildPhone(mode) {
+      var guest = model.guest;
+      var entry = entryOf(guest);
+      var phone = el("section", "phone " + mode);
+      if (mode === "float") {
+        phone.style.left = model.float.x + "px";
+        phone.style.top = model.float.y + "px";
+      }
+      var grip = el("div", "grip");
+      grip.appendChild(el("span", "grip-name", guest.name));
+      ["dock", "float", "full"].forEach(function (name) {
+        var button = el("button", "mode" + (mode === name ? " on" : ""), name === "dock" ? "Dock" : name === "float" ? "Float" : "Full");
+        button.type = "button";
+        button.addEventListener("click", function (event) {
+          event.stopPropagation();
+          setMode(name);
+        });
+        grip.appendChild(button);
+      });
+      if (mode === "float") {
+        grip.addEventListener("pointerdown", function (event) {
+          if (event.target !== grip && event.target.className !== "grip-name") return;
+          var startX = event.clientX;
+          var startY = event.clientY;
+          var originX = model.float.x;
+          var originY = model.float.y;
+          grip.setPointerCapture(event.pointerId);
+          function move(e) {
+            model.float.x = Math.max(8, originX + (e.clientX - startX));
+            model.float.y = Math.max(8, originY + (e.clientY - startY));
+            phone.style.left = model.float.x + "px";
+            phone.style.top = model.float.y + "px";
+          }
+          function up() {
+            grip.removeEventListener("pointermove", move);
+            grip.removeEventListener("pointerup", up);
+          }
+          grip.addEventListener("pointermove", move);
+          grip.addEventListener("pointerup", up);
+        });
+      }
+      phone.appendChild(grip);
+      var glass = el("div", "glass");
+      var bar = el("div", "chrome");
+      bar.appendChild(el("span", "clock", clock()));
+      bar.appendChild(el("span", "island", ""));
+      bar.appendChild(el("span", "sig", ""));
+      glass.appendChild(bar);
+      var views = guest.screen && guest.screen.views ? guest.screen.views : [];
+      var body = el("div", views.length ? "body texts" : "body");
+      if (views.length) {
+        views.forEach(function (view) { body.appendChild(el("p", "label", view.text)); });
+      } else if (entry && entry.state === "run") {
+        if (guest.icon) {
+          var launch = document.createElement("img");
+          launch.alt = "";
+          launch.className = "launch";
+          launch.src = guest.icon;
+          body.appendChild(launch);
+        }
+        body.appendChild(el("p", "launch-name", guest.name));
+      } else {
+        body.appendChild(el("p", "muted", entry ? entry.detail : "Not started."));
+      }
+      glass.appendChild(body);
+      glass.addEventListener("pointerdown", function (event) {
+        var rect = glass.getBoundingClientRect();
+        var ring = el("span", "touch");
+        ring.style.left = (event.clientX - rect.left) + "px";
+        ring.style.top = (event.clientY - rect.top) + "px";
+        glass.appendChild(ring);
+        window.setTimeout(function () { if (ring.parentNode) ring.remove(); }, 480);
+      });
+      var home = el("button", "home");
+      home.type = "button";
+      home.setAttribute("aria-label", "Leave full screen");
+      home.addEventListener("click", function () { if (model.mode === "full") setMode("dock"); });
+      glass.appendChild(home);
+      phone.appendChild(glass);
+      return phone;
+    }
+
+    function syncPhone() {
+      mount.classList.toggle("stage-full", !!(model.guest && model.mode === "full"));
+      var overlay = mount.querySelector(":scope > .phone");
+      if (!model.guest || model.mode === "dock") {
+        if (overlay) overlay.remove();
+        return;
+      }
+      var phone = buildPhone(model.mode);
+      if (overlay) overlay.replaceWith(phone);
+      else mount.appendChild(phone);
+    }
+
     function stageMark(stage) {
       if (stage.state === "run") return "Running";
       if (stage.state === "done") return "Done";
@@ -1764,29 +1863,8 @@
       titles.appendChild(el("p", "muted", [guest.bundleId, guest.version].filter(Boolean).join("  ·  ")));
       who.appendChild(titles);
       main.appendChild(who);
-      var screen = el("div", "screen");
-      var bar = el("div", "chrome");
-      bar.appendChild(el("span", "clock", clock()));
-      bar.appendChild(el("span", "", guest.name));
-      screen.appendChild(bar);
-      var views = guest.screen && guest.screen.views ? guest.screen.views : [];
-      var body = el("div", views.length ? "body texts" : "body");
-      if (views.length) {
-        views.forEach(function (view) { body.appendChild(el("p", "label", view.text)); });
-      } else if (entry && entry.state === "run") {
-        if (guest.icon) {
-          var launch = document.createElement("img");
-          launch.alt = "";
-          launch.className = "launch";
-          launch.src = guest.icon;
-          body.appendChild(launch);
-        }
-        body.appendChild(el("p", "launch-name", guest.name));
-      } else {
-        body.appendChild(el("p", "muted", entry ? entry.detail : "Not started."));
-      }
-      screen.appendChild(body);
-      main.appendChild(screen);
+      if (model.mode === "dock") main.appendChild(buildPhone("dock"));
+      else main.appendChild(el("p", "lead", model.mode === "full" ? "The guest fills this device. The bar at the bottom returns here." : "The guest is floating. Drag its name. Full takes the whole device."));
       if (guest.proc) {
         var alive = entry && entry.state === "run";
         var card = el("div", "proc");
@@ -1887,6 +1965,7 @@
       nav.appendChild(tabButton("now", "Now"));
       nav.appendChild(tabButton("shelf", "Shelf"));
       nav.appendChild(tabButton("bench", "Bench"));
+      syncPhone();
     }
 
     input.addEventListener("change", function () {
@@ -1898,8 +1977,7 @@
     loadShelf().then(draw);
     draw();
     var timer = window.setInterval(function () {
-      var face = mount.querySelector(".clock");
-      if (face) face.textContent = clock();
+      mount.querySelectorAll(".clock").forEach(function (face) { face.textContent = clock(); });
       var up = mount.querySelector(".elapsed");
       if (up && model.booted) up.textContent = elapsed(Date.now() - model.booted);
     }, 1000);
