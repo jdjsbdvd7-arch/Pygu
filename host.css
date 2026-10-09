@@ -15,7 +15,24 @@ button { cursor: pointer; }
   font: 16px/1.45 "IBM Plex Sans", sans-serif;
 }
 .host .shell { height: 100%; display: flex; flex-direction: column; }
-.host header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: max(18px, env(safe-area-inset-top)) 20px 8px; }
+.host { background: #000; }
+.host header { display: none; }
+.host main { padding: max(12px, env(safe-area-inset-top)) 16px 112px; }
+.host .bar { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
+.host .plus { width: 44px; height: 44px; border: 0; border-radius: 22px; background: transparent; color: #66b1ff; font: 300 34px/1 "IBM Plex Sans", sans-serif; }
+.host .sort { border: 0; background: transparent; color: #66b1ff; font: 500 15px/1 "IBM Plex Sans", sans-serif; }
+.host .apps-title { margin: 0 0 12px; font-size: 34px; font-weight: 700; letter-spacing: -0.03em; }
+.host .search { width: 100%; box-sizing: border-box; height: 36px; margin: 0 0 14px; padding: 0 12px; border: 0; border-radius: 10px; background: #1c1c1e; color: #fff; font: 16px/1 "IBM Plex Sans", sans-serif; }
+.host .banner { height: 88px; margin: 0 0 12px; padding: 0 14px; display: flex; align-items: center; gap: 10px; border-radius: 22px; background: #1a3f66; overflow: hidden; }
+.host .banner img, .host .banner-fallback { width: 60px; height: 60px; border-radius: 16px; object-fit: cover; flex: none; }
+.host .banner-fallback { display: grid; place-items: center; background: #163456; color: #fff; font-weight: 700; }
+.host .banner-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.host .banner-copy strong { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.host .ver { color: #66b1ff; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.host .folder { color: rgba(255,255,255,.55); font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.host .run-pill { width: 70px; height: 32px; flex: none; border: 0; border-radius: 16px; background: #66b1ff; color: #fff; font: 700 16px/1 "IBM Plex Sans", sans-serif; }
+.host .empty-note, .host .count { color: #8e8e93; font-size: 13px; }
+.host .plus:disabled, .host .run-pill:disabled { opacity: .5; }
 .host .brand { flex: 1; min-width: 0; }
 .host .word { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.04em; }
 .host .clock, .host .status { margin: 0; }
@@ -96,3 +113,6 @@ button { cursor: pointer; }
 @media (min-width: 900px) {
   .host .stage { left: 200px; bottom: 0; }
 }
+.host, .host main, .host nav { background: #000; }
+.host main { padding: max(12px, env(safe-area-inset-top)) 16px 112px; }
+.host nav { border-top-color: #2c2c2e; }

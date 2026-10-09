@@ -659,6 +659,14 @@
     var typeCache = {};
     image.stubs[retSlot] = "hostReturn";
     image.stubs[exitSlot] = "guestExit";
+    var vwtSlot = 0x210000300;
+    var vwtName = ["vwtInitBuf", "vwtDestroy", "vwtInitCopy", "vwtAssignCopy", "vwtInitTake", "vwtAssignTake", "vwtGetSP", "vwtStoreSP", "vwtGetTag", "vwtProject"];
+    var vi;
+    for (vi = 0; vi < vwtName.length; vi += 1) image.stubs[vwtSlot + vi * 16] = vwtName[vi];
+    var witnessSlot = 0x210000220;
+    var lookupSlot = 0x210000230;
+    image.stubs[witnessSlot] = "swiftWitness";
+    image.stubs[lookupSlot] = "swiftLookup";
     x[30] = exitSlot;
     function sex32(at) {
       if (!mem.seg(at)) return 0;
@@ -730,6 +738,69 @@
       if (!typeCache[key]) typeCache[key] = allocMeta(context || 0, 1);
       return typeCache[key];
     }
+    function alignBump() {
+      bump = (bump + 15) & ~15;
+    }
+    function kindOfSymbol(name) {
+      if (/4UUID|4DataV|SSMa$|12StaticString/.test(name)) return { kind: 0x200, size: 16 };
+      if (/SiMa$|Si_/.test(name) || /s5Int64|s6UInt64|s5Int32|SdMa$|SfMa$/.test(name)) return { kind: 0x200, size: 8 };
+      if (/SbMa$/.test(name)) return { kind: 0x200, size: 1 };
+      if (/CMa$/.test(name)) return { kind: 0, size: 8 };
+      if (/OMa$/.test(name)) return { kind: 0x201, size: 8 };
+      return { kind: 0x200, size: 16 };
+    }
+    function shapeNamed(name) {
+      var key = "shape:" + name;
+      if (typeCache[key]) return typeCache[key];
+      var spec = kindOfSymbol(name);
+      alignBump();
+      var vwt = bump;
+      var meta = vwt + 128;
+      bump = meta + 64;
+      var slot;
+      for (slot = 0; slot < 8; slot += 1) mem.w64(vwt + slot * 8, vwtSlot + slot * 16);
+      mem.w64(vwt + 64, spec.size);
+      mem.w64(vwt + 72, Math.max(spec.size, 1));
+      mem.w32(vwt + 80, spec.size >= 8 ? 7 : Math.max(spec.size - 1, 0));
+      mem.w32(vwt + 84, 0);
+      mem.w64(vwt + 88, vwtSlot + 8 * 16);
+      mem.w64(vwt + 96, vwtSlot + 9 * 16);
+      mem.w64(meta - 8, vwt);
+      mem.w64(meta, spec.kind);
+      typeCache[key] = meta;
+      return meta;
+    }
+    function witnessFor(name) {
+      var key = "wit:" + name;
+      if (typeCache[key]) return typeCache[key];
+      alignBump();
+      var ptr = bump;
+      bump += 64;
+      var slot;
+      for (slot = 0; slot < 8; slot += 1) mem.w64(ptr + slot * 8, witnessSlot);
+      typeCache[key] = ptr;
+      return ptr;
+    }
+    function valueSize(metadata) {
+      if (!metadata || !mem.seg(metadata - 8)) return 16;
+      var vwt = mem.u64(metadata - 8);
+      if (!vwt || !mem.seg(vwt + 64)) return 16;
+      var size = mem.u64(vwt + 64);
+      if (!size || size > 4096) return 16;
+      return size;
+    }
+    function swiftSymbol(name) {
+      var tail = name.slice(-2);
+      if (tail === "Ma" || tail === "Mi") {
+        x[1] = 0;
+        return shapeNamed(name);
+      }
+      if (tail === "Mn" || tail === "Mf" || tail === "MH" || tail === "ML" || tail === "Mr" || tail === "Mp") return shapeNamed(name);
+      if (tail === "Mu") return lookupSlot;
+      if (tail === "Wl" || tail === "WA" || tail === "Wt" || name.slice(-3) === "Mc") return witnessFor(name);
+      if (/fC$/.test(name) || /fc$/.test(name) || /fD$/.test(name)) return fresh("value", name);
+      return 0;
+    }
     function callGuest(fn, a0, a1, a2, done) {
       retStack.push({ back: x[30], done: done });
       redirect = fn;
@@ -745,7 +816,7 @@
         stop = "Unmapped call at " + addr.toString(16);
         return 0;
       }
-      if (name !== "hostReturn" && name !== "guestExit") remember(name);
+      if (name !== "hostReturn" && name !== "guestExit" && name.indexOf("vwt") !== 0 && name !== "swiftWitness") remember(name);
       if (name === "hostReturn") {
         var frame = retStack.pop();
         if (!frame) {
@@ -758,6 +829,15 @@
         redirect = frame.back || 1;
         return out.x0 || 0;
       }
+      if (name.indexOf("vwt") === 0) {
+        if (name === "vwtDestroy" || name === "vwtStoreSP" || name === "vwtProject") return 0;
+        if (name === "vwtGetSP" || name === "vwtGetTag") return 0;
+        var bytes = valueSize(name === "vwtInitBuf" ? x[2] : x[2]);
+        if (x[0] && x[1]) mem.copy(x[0], x[1], bytes);
+        return x[0];
+      }
+      if (name === "swiftWitness") return x[0];
+      if (name === "swiftLookup") return 0;
       if (name === "guestExit") {
         redirect = 1;
         return x[0];
@@ -976,6 +1056,23 @@
         return typeCache[genericKey];
       }
       if (name === "swift_initClassMetadata" || name === "swift_initClassMetadata2" || name === "swift_updateClassMetadata2" || name === "swift_initStructMetadata" || name === "swift_initEnumMetadataSinglePayload" || name === "swift_initEnumMetadataMultiPayload" || name === "swift_initStaticObject") return 0;
+      if (name === "abort" || name === "__abort" || name === "swift_deletedMethodError") {
+        stop = "The guest aborted.";
+        redirect = 1;
+        return 0;
+      }
+      if (name.indexOf("OBJC_CLASS_$") === 0 || name.indexOf("OBJC_METACLASS_$") === 0) {
+        var clsName = name.slice(name.lastIndexOf("_") + 1);
+        return put({ kind: "class", text: clsName, className: clsName });
+      }
+      if (name.indexOf("$s") === 0 || name.indexOf("$S") === 0) return swiftSymbol(name);
+      if (name.indexOf("objc_") === 0 || name.indexOf("class_") === 0 || name.indexOf("object_") === 0 || name.indexOf("method_") === 0 || name.indexOf("sel_") === 0 || name.indexOf("ivar_") === 0 || name.indexOf("protocol_") === 0 || name.indexOf("property_") === 0 || name.indexOf("imp_") === 0 || name.indexOf("_Block_") === 0) {
+        if (name.indexOf("release") !== -1 || name.indexOf("Release") !== -1 || name.indexOf("store") !== -1) return 0;
+        return x[0] || 1;
+      }
+      if (name.indexOf("os_") === 0 || name.indexOf("pthread_") === 0 || name.indexOf("dispatch_") === 0 || name.indexOf("voucher_") === 0) return 0;
+      if (name.indexOf("arc4random") === 0) return (Math.random() * 4294967296) >>> 0;
+      if (name === "mach_absolute_time" || name === "clock_gettime_nsec_np") return Date.now() * 1000000;
       stop = "The guest calls " + name + ". This host does not provide that call.";
       redirect = 1;
       return 0;
@@ -1626,11 +1723,10 @@
   function start(mount) {
     mount.className = "host";
     mount.replaceChildren();
-    var model = { tab: "now", guest: null, error: "", busy: false, shelf: [], booted: 0 };
+    var model = { tab: "apps", guest: null, error: "", busy: false, shelf: [], booted: 0, query: "", sort: "opened" };
     var icons = {
-      now: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
-      shelf: "M5 7h14M5 12h14M5 17h8",
-      bench: "M6 19V6M12 19V10M18 19v-7"
+      apps: "M4 7h7v7H4zM13 7h7v7h-7zM4 16h7v4H4zM13 16h7v4h-7z",
+      settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"
     };
     var input = document.createElement("input");
     input.type = "file";
@@ -1710,14 +1806,14 @@
     function showGuest(guest) {
       model.guest = guest;
       model.booted = Date.now();
-      model.tab = "now";
+      model.tab = "apps";
       model.error = "";
     }
 
     function openBuffer(bytes, keep) {
       model.busy = true;
       model.error = "";
-      model.tab = "now";
+      model.tab = "apps";
       draw();
       openIpa(bytes).then(function (guest) {
         showGuest(guest);
@@ -1734,7 +1830,7 @@
     function relaunch(id) {
       model.busy = true;
       model.error = "";
-      model.tab = "now";
+      model.tab = "apps";
       draw();
       database().then(function (db) {
         return new Promise(function (resolve, reject) {
@@ -1782,7 +1878,8 @@
 
     function syncStage() {
       var overlay = mount.querySelector(":scope > .stage");
-      if (!model.guest || model.tab !== "now") {
+      var views = model.guest && model.guest.screen && model.guest.screen.views ? model.guest.screen.views : [];
+      if (model.tab !== "apps" || !views.length) {
         if (overlay) overlay.remove();
         return;
       }
@@ -1797,83 +1894,91 @@
       return "Stopped";
     }
 
-    function paintNow() {
+    function paintApps() {
       if (model.error) main.appendChild(el("p", "error", model.error));
-      if (!model.guest) {
-        var empty = el("section", "empty");
-        empty.appendChild(el("p", "eyebrow", "Host"));
-        empty.appendChild(el("h2", "", "An IPA you own, in a process of its own."));
-        empty.appendChild(el("p", "lead", "Pygu gives it a pid, a container, and a screen. Store encryption is left where it is."));
-        var open = el("button", "open", model.busy ? "Reading" : "Open IPA");
-        open.type = "button";
-        open.disabled = model.busy;
-        open.addEventListener("click", function () { input.click(); });
-        empty.appendChild(open);
-        main.appendChild(empty);
-        return;
-      }
-      var guest = model.guest;
-      var entry = entryOf(guest);
-      var who = el("div", "who");
-      if (guest.icon) {
-        var img = document.createElement("img");
-        img.alt = "";
-        img.src = guest.icon;
-        who.appendChild(img);
-      }
-      var titles = el("div");
-      titles.appendChild(el("h2", "", guest.name));
-      titles.appendChild(el("p", "muted", [guest.bundleId, guest.version].filter(Boolean).join("  ·  ")));
-      who.appendChild(titles);
-      main.appendChild(who);
-      if (guest.proc) {
-        var alive = entry && entry.state === "run";
-        var card = el("div", "proc");
-        card.appendChild(el("p", "kicker", "Process"));
-        card.appendChild(el("p", alive ? "pid run" : "pid stop", String(guest.proc.pid)));
-        card.appendChild(el("p", "meta", "parent " + guest.proc.ppid + "  ·  uid " + guest.proc.uid + "  ·  " + (alive ? "up " : "held ")));
-        var up = card.querySelector(".meta");
-        up.appendChild(el("span", "elapsed", elapsed(Date.now() - model.booted)));
-        card.appendChild(el("p", "path", guest.proc.home));
-        main.appendChild(card);
-      }
-    }
-
-    function paintShelf() {
-      main.appendChild(el("h2", "page-title", "Shelf"));
-      main.appendChild(el("p", "lead", "Kept on this device. Nothing is uploaded."));
-      if (!model.shelf.length) {
-        main.appendChild(el("p", "muted", "Nothing kept yet. Open an IPA and it stays here."));
-        return;
-      }
-      model.shelf.forEach(function (item) {
-        var row = el("div", "shelf");
-        var launch = el("button", "shelf-open");
-        launch.type = "button";
+      var bar = el("div", "bar");
+      var plus = el("button", "plus", "+");
+      plus.type = "button";
+      plus.setAttribute("aria-label", "add");
+      plus.disabled = model.busy;
+      plus.addEventListener("click", function () { input.click(); });
+      bar.appendChild(plus);
+      var sort = document.createElement("select");
+      sort.className = "sort";
+      [["opened", "Last Opened"], ["az", "Name (A–Z)"], ["za", "Name (Z–A)"]].forEach(function (pair) {
+        var option = document.createElement("option");
+        option.value = pair[0];
+        option.textContent = pair[1];
+        if (model.sort === pair[0]) option.selected = true;
+        sort.appendChild(option);
+      });
+      sort.addEventListener("change", function () {
+        model.sort = sort.value;
+        draw();
+      });
+      bar.appendChild(sort);
+      main.appendChild(bar);
+      main.appendChild(el("h1", "apps-title", "My Apps"));
+      var search = document.createElement("input");
+      search.className = "search";
+      search.type = "search";
+      search.placeholder = "Search";
+      search.value = model.query || "";
+      search.addEventListener("input", function () {
+        model.query = search.value;
+        draw();
+        var field = mount.querySelector(".search");
+        if (field) field.focus();
+      });
+      main.appendChild(search);
+      var needle = (model.query || "").toLowerCase();
+      var items = model.shelf.filter(function (item) {
+        if (!needle) return true;
+        return (item.name + " " + (item.bundleId || "")).toLowerCase().indexOf(needle) !== -1;
+      });
+      items.sort(function (a, b) {
+        if (model.sort === "az") return a.name.localeCompare(b.name);
+        if (model.sort === "za") return b.name.localeCompare(a.name);
+        return (b.added || 0) - (a.added || 0);
+      });
+      if (!items.length) main.appendChild(el("p", "empty-note", model.shelf.length ? "No matching apps." : "Press the Plus Button to Install Apps."));
+      items.forEach(function (item) {
+        var card = el("article", "banner");
         if (item.icon) {
           var img = document.createElement("img");
           img.alt = "";
           img.src = item.icon;
-          launch.appendChild(img);
-        }
-        var text = el("span", "shelf-copy");
-        text.appendChild(el("strong", "", item.name));
-        text.appendChild(el("span", "muted", [item.bundleId, item.version].filter(Boolean).join("  ·  ")));
-        launch.appendChild(text);
-        launch.addEventListener("click", function () { relaunch(item.id); });
-        var remove = el("button", "forget", "Remove");
-        remove.type = "button";
-        remove.addEventListener("click", function () { forget(item.id); });
-        row.appendChild(launch);
-        row.appendChild(remove);
-        main.appendChild(row);
+          card.appendChild(img);
+        } else card.appendChild(el("span", "banner-fallback", (item.name || "?").slice(0, 1)));
+        var copy = el("div", "banner-copy");
+        copy.appendChild(el("strong", "", item.name));
+        copy.appendChild(el("span", "ver", [item.version, item.bundleId].filter(Boolean).join(" - ")));
+        var same = model.guest && model.guest.bundleId === item.bundleId && model.guest.proc;
+        copy.appendChild(el("span", "folder", same ? model.guest.proc.home : "Data folder not created yet"));
+        card.appendChild(copy);
+        var run = el("button", "run-pill", model.busy ? "…" : "Run");
+        run.type = "button";
+        run.disabled = model.busy;
+        run.addEventListener("click", function (event) {
+          event.stopPropagation();
+          relaunch(item.id);
+        });
+        card.appendChild(run);
+        card.addEventListener("dblclick", function () { model.tab = "settings"; draw(); });
+        card.addEventListener("contextmenu", function (event) {
+          event.preventDefault();
+          forget(item.id);
+        });
+        main.appendChild(card);
       });
+      var count = model.shelf.length;
+      main.appendChild(el("p", "count", count === 1 ? "1 App in total" : count + " Apps in total"));
     }
 
-    function paintBench() {
-      main.appendChild(el("h2", "page-title", "Bench"));
+    function paintSettings() {
+      main.appendChild(el("h1", "apps-title", "Settings"));
       if (!model.guest) {
-        main.appendChild(el("p", "lead", "Open an IPA to inspect the process."));
+        main.appendChild(el("p", "empty-note", "Run an app to see its entry."));
         return;
       }
       var guest = model.guest;
@@ -1884,6 +1989,12 @@
         main.appendChild(row);
         main.appendChild(el("p", "detail", stage.detail));
       });
+      if (guest.libraries && guest.libraries.length) {
+        main.appendChild(el("h3", "", "Linked"));
+        var chips = el("div", "chips");
+        guest.libraries.forEach(function (name) { chips.appendChild(el("span", "chip", name)); });
+        main.appendChild(chips);
+      }
       if (guest.proc && guest.proc.env) {
         main.appendChild(el("h3", "", "Environment"));
         Object.keys(guest.proc.env).forEach(function (key) {
@@ -1893,39 +2004,16 @@
           main.appendChild(line);
         });
       }
-      if (guest.libraries && guest.libraries.length) {
-        main.appendChild(el("h3", "", "Linked"));
-        var chips = el("div", "chips");
-        guest.libraries.forEach(function (name) { chips.appendChild(el("span", "chip", name)); });
-        main.appendChild(chips);
-      }
-      if (guest.logs && guest.logs.length) {
-        main.appendChild(el("h3", "", "Log"));
-        guest.logs.forEach(function (line) { main.appendChild(el("p", "log", line)); });
-      }
     }
 
     function draw() {
       header.replaceChildren();
-      var brand = el("div", "brand");
-      brand.appendChild(el("p", "word", "Pygu"));
-      brand.appendChild(el("p", "clock", clock()));
-      header.appendChild(brand);
-      var status = el("p", "status " + (model.busy ? "stop" : statusWord() === "Running" ? "run" : statusWord() === "Stopped" ? "stop" : "idle"), statusWord());
-      header.appendChild(status);
-      var open = el("button", "open small", model.busy ? "Reading" : "Open");
-      open.type = "button";
-      open.disabled = model.busy;
-      open.addEventListener("click", function () { input.click(); });
-      if (!(model.tab === "now" && !model.guest)) header.appendChild(open);
       main.replaceChildren();
-      if (model.tab === "shelf") paintShelf();
-      else if (model.tab === "bench") paintBench();
-      else paintNow();
+      if (model.tab === "settings") paintSettings();
+      else paintApps();
       nav.replaceChildren();
-      nav.appendChild(tabButton("now", "Now"));
-      nav.appendChild(tabButton("shelf", "Shelf"));
-      nav.appendChild(tabButton("bench", "Bench"));
+      nav.appendChild(tabButton("apps", "Apps"));
+      nav.appendChild(tabButton("settings", "Settings"));
       syncStage();
     }
 
