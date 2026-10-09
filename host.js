@@ -791,14 +791,17 @@
     }
     function swiftSymbol(name) {
       var tail = name.slice(-2);
-      if (tail === "Ma" || tail === "Mi") {
+      if (tail === "Ma" || tail === "Mi" || tail === "Wt" || tail === "TM") {
         x[1] = 0;
         return shapeNamed(name);
       }
-      if (tail === "Mn" || tail === "Mf" || tail === "MH" || tail === "ML" || tail === "Mr" || tail === "Mp") return shapeNamed(name);
-      if (tail === "Mu") return lookupSlot;
-      if (tail === "Wl" || tail === "WA" || tail === "Wt" || name.slice(-3) === "Mc") return witnessFor(name);
-      if (/fC$/.test(name) || /fc$/.test(name) || /fD$/.test(name)) return fresh("value", name);
+      if (tail === "Mr") {
+        x[1] = 0;
+        return 0;
+      }
+      if (tail === "Mu" || tail === "MU") return lookupSlot;
+      if (tail === "Wa" || tail === "WT" || tail === "Wb" || tail === "Wl" || tail === "TN") return witnessFor(name);
+      if (/fC$/.test(name) || /fc$/.test(name)) return fresh("value", name);
       return 0;
     }
     function callGuest(fn, a0, a1, a2, done) {
